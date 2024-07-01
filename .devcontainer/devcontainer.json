@@ -3,12 +3,9 @@
     "dockerComposeFile": "docker-compose.yml",
     "service": "dev",
     "workspaceFolder": "/workspace",
-
     "userEnvProbe": "loginShell",
     "updateRemoteUserUID": false,
-
     "onCreateCommand": "${containerWorkspaceFolder}/.devcontainer/setup.sh",
-
     "customizations": {
         "vscode": {
             "settings": {
@@ -34,7 +31,7 @@
                 "serayuzgur.crates",
                 "yzhang.markdown-all-in-one",
                 "tamasfe.even-better-toml"
-            ],
+            ]
         }
     }
 }
