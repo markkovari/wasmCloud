@@ -10,6 +10,7 @@ use tokio::fs::{create_dir_all, metadata, File};
 use tokio_stream::StreamExt;
 use tokio_tar::Archive;
 use wasmcloud_core::tls::NativeRootsExt;
+mod spec;
 
 const DOWNLOAD_CLIENT_USER_AGENT: &str =
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
