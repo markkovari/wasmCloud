@@ -1,6 +1,7 @@
 //! Reusable code for downloading tarballs from GitHub releases
 
 use anyhow::{anyhow, bail, Result};
+use api::GitHubRelease;
 use async_compression::tokio::bufread::GzipDecoder;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::PermissionsExt;
@@ -10,7 +11,7 @@ use tokio::fs::{create_dir_all, metadata, File};
 use tokio_stream::StreamExt;
 use tokio_tar::Archive;
 use wasmcloud_core::tls::NativeRootsExt;
-mod spec;
+mod api;
 
 const DOWNLOAD_CLIENT_USER_AGENT: &str =
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));

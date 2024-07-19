@@ -3,6 +3,22 @@ use serde::{Deserialize, Serialize};
 
 type DateTimeUtc = DateTime<Utc>;
 
+const GITHUB_PER_PAGE: u32 = 20000;
+
+async fn get_sorted_releases_of(
+    owner: String,
+    repo: String,
+) -> Result<Vec<GitHubRelease>, reqwest::Error> {
+    let wasm_cloud_releases = fetch_latest_releases(owner, repo).await?;
+
+    let mut wasm_cloud_releases = wasm_cloud_releases
+        .into_iter()
+        .filter(GitHubRelease::is_not_draft_or_pre_release)
+        .collect::<Vec<GitHubRelease>>();
+    wasm_cloud_releases.sort_by(|a, b| a.published_at.cmp(&b.published_at));
+    Ok(wasm_cloud_releases)
+}
+
 /// GitHubRelease represents the necessary fields to determine wadm and/or wasmCloud
 /// has new patch version available. The fields are based on the response from the
 /// GitHub release (https://developer.github.com/v3/repos/releases/).
@@ -29,6 +45,25 @@ impl GitHubRelease {
             Err(_) => None,
         }
     }
+}
+
+/// Returns the URL to fetch the latest release from the GitHub repository.
+/// doc: https://developer.github.com/v3/repos/releases/#get-the-latest-release
+fn format_latest_releases(owner: String, repo: String) -> String {
+    format!(
+        "https://api.github.com/repos/{}/{}/releases/latest?page=0&page={}",
+        owner, repo, GITHUB_PER_PAGE
+    )
+}
+
+async fn fetch_latest_releases(
+    owner: String,
+    repo: String,
+) -> Result<Vec<GitHubRelease>, reqwest::Error> {
+    let url = format_latest_releases(owner, repo);
+    let response = reqwest::get(&url).await?;
+    let release = response.json::<Vec<GitHubRelease>>().await?;
+    Ok(release)
 }
 
 // TODO: find any chrono serde implementation that can be used instead of this.
