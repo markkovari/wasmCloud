@@ -1,14 +1,21 @@
+use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde::de::Error;
+use wasmcloud_core::tls::NativeRootsExt;
 
 type DateTimeUtc = DateTime<Utc>;
 
-const GITHUB_PER_PAGE: u32 = 20000;
+/// GitHub page max https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
+const GITHUB_PER_PAGE: u32 = 100;
+
+const VERSION_FETCHER_CLIENT_USER_AGENT: &str =
+    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 async fn get_sorted_releases_of(
     owner: String,
     repo: String,
-) -> Result<Vec<GitHubRelease>, reqwest::Error> {
+) -> Result<Vec<GitHubRelease>, anyhow::Error> {
     let wasm_cloud_releases = fetch_latest_releases(owner, repo).await?;
 
     let mut wasm_cloud_releases = wasm_cloud_releases
@@ -19,11 +26,47 @@ async fn get_sorted_releases_of(
     Ok(wasm_cloud_releases)
 }
 
+async fn get_newest_patch_releases(
+    current_wadm_version: semver::Version,
+    wadm_releases: Vec<GitHubRelease>,
+    current_wasmcloud_version: semver::Version,
+    wasmcloud_releases: Vec<GitHubRelease>,
+) -> (Option<GitHubRelease>, Option<GitHubRelease>) {
+    let newest_wadm_patch_versions = wadm_releases
+        .into_iter()
+        .take_while(|release| match release.is_main_release() {
+            Some(version) => {
+                version.major == current_wadm_version.major
+                    && version.minor == current_wadm_version.minor
+                    && version.patch > current_wadm_version.patch
+            }
+            None => false,
+        })
+        .collect::<Vec<GitHubRelease>>();
+
+    let newest_wasmcloud_patch_versions = wasmcloud_releases
+        .into_iter()
+        .take_while(|release| match release.is_main_release() {
+            Some(version) => {
+                version.major == current_wasmcloud_version.major
+                    && version.minor == current_wasmcloud_version.minor
+                    && version.patch > current_wasmcloud_version.patch
+            }
+            None => false,
+        })
+        .collect::<Vec<GitHubRelease>>();
+
+    (
+        newest_wadm_patch_versions.into_iter().next(),
+        newest_wasmcloud_patch_versions.into_iter().next(),
+    )
+}
+
 /// GitHubRelease represents the necessary fields to determine wadm and/or wasmCloud
 /// has new patch version available. The fields are based on the response from the
 /// GitHub release (https://developer.github.com/v3/repos/releases/).
 ///
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct GitHubRelease {
     pub tag_name: String,
     pub name: String,
@@ -51,7 +94,7 @@ impl GitHubRelease {
 /// doc: https://developer.github.com/v3/repos/releases/#get-the-latest-release
 fn format_latest_releases(owner: String, repo: String) -> String {
     format!(
-        "https://api.github.com/repos/{}/{}/releases/latest?page=0&page={}",
+        "https://api.github.com/repos/{}/{}/releases?page=0&per_page={}",
         owner, repo, GITHUB_PER_PAGE
     )
 }
@@ -61,9 +104,15 @@ async fn fetch_latest_releases(
     repo: String,
 ) -> Result<Vec<GitHubRelease>, reqwest::Error> {
     let url = format_latest_releases(owner, repo);
-    let response = reqwest::get(&url).await?;
-    let release = response.json::<Vec<GitHubRelease>>().await?;
-    Ok(release)
+    // TODO: share request instance and probably create an iterator or stream
+    let client = reqwest::ClientBuilder::default()
+        .user_agent(VERSION_FETCHER_CLIENT_USER_AGENT)
+        .with_native_certificates()
+        .build()
+        .expect("failed to build HTTP client");
+    let response = client.get(&url).send().await?;
+    let releases = response.json::<Vec<GitHubRelease>>().await?;
+    Ok(releases)
 }
 
 // TODO: find any chrono serde implementation that can be used instead of this.
@@ -172,5 +221,13 @@ mod tests {
         };
         let version = release_with_prefix.is_main_release();
         assert!(version.is_none());
+    }
+
+    #[tokio::test]
+    async fn test() {
+        let owner = "wasmCloud".to_string();
+        let repo = "wasmCloud".to_string();
+        let releases = get_sorted_releases_of(owner, repo).await;
+        assert!(releases.is_ok())
     }
 }
