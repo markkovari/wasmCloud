@@ -1,7 +1,5 @@
-use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde::de::Error;
 use wasmcloud_core::tls::NativeRootsExt;
 
 type DateTimeUtc = DateTime<Utc>;
@@ -15,18 +13,16 @@ const VERSION_FETCHER_CLIENT_USER_AGENT: &str =
 async fn get_sorted_releases_of(
     owner: String,
     repo: String,
+    fallback: String,
 ) -> Result<Vec<GitHubRelease>, anyhow::Error> {
-    let wasm_cloud_releases = fetch_latest_releases(owner, repo).await?;
+    let releases_of_repo = fetch_latest_releases(owner, repo, fallback).await?;
 
-    let mut wasm_cloud_releases = wasm_cloud_releases
-        .into_iter()
-        .filter(GitHubRelease::is_not_draft_or_pre_release)
-        .collect::<Vec<GitHubRelease>>();
-    wasm_cloud_releases.sort_by(|a, b| a.published_at.cmp(&b.published_at));
-    Ok(wasm_cloud_releases)
+    let mut releases_of_repo = releases_of_repo.into_iter().collect::<Vec<GitHubRelease>>();
+    releases_of_repo.sort_by(|a, b| a.published_at.cmp(&b.published_at));
+    Ok(releases_of_repo)
 }
 
-async fn get_newest_patch_releases(
+pub async fn get_newest_patch_releases(
     current_wadm_version: semver::Version,
     wadm_releases: Vec<GitHubRelease>,
     current_wasmcloud_version: semver::Version,
@@ -66,7 +62,7 @@ async fn get_newest_patch_releases(
 /// has new patch version available. The fields are based on the response from the
 /// GitHub release (https://developer.github.com/v3/repos/releases/).
 ///
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GitHubRelease {
     pub tag_name: String,
     pub name: String,
@@ -74,6 +70,11 @@ pub struct GitHubRelease {
     pub published_at: DateTimeUtc,
     pub draft: bool,
     pub prerelease: bool,
+}
+impl PartialEq for GitHubRelease {
+    fn eq(&self, other: &Self) -> bool {
+        self.tag_name == other.tag_name
+    }
 }
 
 impl GitHubRelease {
@@ -92,26 +93,49 @@ impl GitHubRelease {
 
 /// Returns the URL to fetch the latest release from the GitHub repository.
 /// doc: https://developer.github.com/v3/repos/releases/#get-the-latest-release
-fn format_latest_releases(owner: String, repo: String) -> String {
+fn format_latest_releases(owner: String, repo: String, page: u32) -> String {
     format!(
-        "https://api.github.com/repos/{}/{}/releases?page=0&per_page={}",
-        owner, repo, GITHUB_PER_PAGE
+        "https://api.github.com/repos/{}/{}/releases?page={}&per_page={}",
+        owner, repo, page, GITHUB_PER_PAGE
     )
 }
-
 async fn fetch_latest_releases(
     owner: String,
     repo: String,
+    fallback: String,
 ) -> Result<Vec<GitHubRelease>, reqwest::Error> {
-    let url = format_latest_releases(owner, repo);
-    // TODO: share request instance and probably create an iterator or stream
     let client = reqwest::ClientBuilder::default()
         .user_agent(VERSION_FETCHER_CLIENT_USER_AGENT)
         .with_native_certificates()
         .build()
         .expect("failed to build HTTP client");
-    let response = client.get(&url).send().await?;
-    let releases = response.json::<Vec<GitHubRelease>>().await?;
+
+    let page = 0u32;
+    println!("fetching releases from github, current page: {}", page);
+    let url = format_latest_releases(owner, repo, page);
+    let mut releases = Vec::new();
+    loop {
+        let response = client.get(&url).send().await?;
+        if !response.status().is_success() {
+            break;
+        }
+        let mut releases_on_page = response.json::<Vec<GitHubRelease>>().await?;
+        println!("releases_on_page: {:?}", releases_on_page);
+        if releases_on_page.is_empty() {
+            break;
+        }
+        if releases_on_page.len() < GITHUB_PER_PAGE as usize {
+            break;
+        }
+        if releases_on_page
+            .clone()
+            .into_iter()
+            .any(|release: GitHubRelease| release.tag_name == fallback)
+        {
+            break;
+        }
+        releases.append(&mut releases_on_page);
+    }
     Ok(releases)
 }
 
@@ -143,6 +167,7 @@ mod github_date_format {
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
+    use tracing::debug;
 
     use super::*;
 
@@ -223,11 +248,15 @@ mod tests {
         assert!(version.is_none());
     }
 
+    /// Test if the GitHubRelease struct is parsed correctly from the raw string.
+    /// Using an already "outdated" patch version to test if the sorting works correctly and comperable to the current version.
     #[tokio::test]
-    async fn test() {
+    #[cfg_attr(not(can_reach_github_com), ignore = "github.com is not reachable")]
+    async fn test_fetching_wasmcloud_patch_versions_after_v_1_0_3() {
         let owner = "wasmCloud".to_string();
         let repo = "wasmCloud".to_string();
-        let releases = get_sorted_releases_of(owner, repo).await;
+        // Use 1.0.3 as fallback version, since there is a newer version
+        let releases = get_sorted_releases_of(owner, repo, "v1.0.3".to_string()).await;
         assert!(releases.is_ok())
     }
 }

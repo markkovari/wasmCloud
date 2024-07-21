@@ -1,7 +1,6 @@
 //! Reusable code for downloading tarballs from GitHub releases
 
 use anyhow::{anyhow, bail, Result};
-use api::GitHubRelease;
 use async_compression::tokio::bufread::GzipDecoder;
 #[cfg(target_family = "unix")]
 use std::os::unix::prelude::PermissionsExt;
