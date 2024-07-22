@@ -123,7 +123,7 @@ where
         dir,
         WADM_BINARY,
     )
-    .await
+        .await
 }
 
 /// Configuration for wadm
