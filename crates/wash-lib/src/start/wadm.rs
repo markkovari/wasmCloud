@@ -122,8 +122,7 @@ where
         &wadm_url(std::env::consts::OS, std::env::consts::ARCH, version),
         dir,
         WADM_BINARY,
-    )
-        .await
+    ).await
 }
 
 /// Configuration for wadm

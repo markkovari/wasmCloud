@@ -4,6 +4,7 @@ use anyhow::Error;
 use chrono::{DateTime, Utc};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use wasmtime_wasi::IsATTY::No;
 use wasmcloud_core::tls::NativeRootsExt;
 
 type DateTimeUtc = DateTime<Utc>;
@@ -32,44 +33,30 @@ async fn get_chronologically_sorted_releases_of_after(
 async fn new_patch_releases_of_after(
     owner: String,
     repo: String,
-    after_version: semver::Version,
-) -> Result<Vec<GitHubRelease>, anyhow::Error> {
+    after_version: Version,
+) -> Result<Vec<GitHubRelease>, Error> {
     let releases = get_chronologically_sorted_releases_of_after(owner, repo, after_version).await?;
     let main_releases = releases.into_iter().filter(|release| release.get_main_artifact_release().is_some()).collect::<Vec<GitHubRelease>>();
     Ok(main_releases)
 }
 
-const WADM_OWNER: &str = "wasmCloud";
-const WADM_REPO: &str = "wadm";
+// const WADM_OWNER: &str = "wasmCloud";
+// const WADM_REPO: &str = "wadm";
+// const WASMCLOUD_OWNER: &str = "wasmCloud";
+// const WASMCLOUD_REPO: &str = "wasmCloud";
 
-const WASMCLOUD_OWNER: &str = "wasmCloud";
-const WASMCLOUD_REPO: &str = "wasmCloud";
-
-pub async fn get_new_patches(
-    current_wadm_version: Version,
-    current_wasmcloud_version: Version,
-) -> Result<(Option<Version>, Option<Version>), anyhow::Error> {
-    let wadm_patches = match new_patch_releases_of_after(WADM_OWNER.to_string(), WADM_REPO.to_string(), current_wadm_version).await {
-        Ok(patches) => patches,
-        /// disallow bailing, we want to fetch both maybe revert to request::error
-        _ => vec![]
+pub async fn new_patch_version_of_after(
+    owner: String,
+    repo: String,
+    after_version: Version,
+) -> Result<Option<Version>, Error> {
+    return match new_patch_releases_of_after(owner, repo, after_version).await {
+        Ok(patches) => match patches.first() {
+            Some(patch) => Ok(patch.get_main_artifact_release()),
+            None => Ok(None),
+        },
+        _ => Ok(None)
     };
-    let wasmcloud_patches = match new_patch_releases_of_after(WADM_OWNER.to_string(), WADM_REPO.to_string(), current_wasmcloud_version).await {
-        Ok(patches) => patches,
-        /// disallow bailing, we want to fetch both maybe revert to request::error
-        _ => vec![]
-    };
-
-    let new_wasmcloud_patch_version = match wasmcloud_patches.get(0) {
-        Some(release) => release.get_main_artifact_release(),
-        None => None
-    };
-    let new_wadm_patch_version = match wadm_patches.get(0) {
-        Some(release) => release.get_main_artifact_release(),
-        None => None
-    };
-
-    Ok((new_wasmcloud_patch_version, new_wadm_patch_version))
 }
 
 /// GitHubRelease represents the necessary fields to determine wadm and/or wasmCloud

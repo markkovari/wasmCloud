@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -11,6 +12,7 @@ use std::sync::{
 use anyhow::{anyhow, bail, Context, Result};
 use async_nats::Client;
 use clap::Parser;
+use semver::Version;
 use serde_json::{json, Value};
 use sysinfo::{System, SystemExt};
 
@@ -19,7 +21,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Child,
 };
-use tracing::warn;
+use tracing::{info, warn};
 use wash_lib::app::{load_app_manifest, AppManifest, AppManifestSource};
 use wash_lib::cli::{CommandOutput, OutputKind};
 use wash_lib::config::{
@@ -27,6 +29,7 @@ use wash_lib::config::{
 };
 use wash_lib::context::fs::ContextDir;
 use wash_lib::context::ContextManager;
+use wash_lib::start::new_patch_version_of_after;
 use wash_lib::start::{
     ensure_nats_server, ensure_wadm, ensure_wasmcloud, find_wasmcloud_binary, nats_pid_path,
     start_nats_server, start_wadm, start_wasmcloud_host, NatsConfig, WadmConfig, WADM_PID,
@@ -139,7 +142,9 @@ impl From<NatsOpts> for NatsConfig {
 #[derive(Parser, Debug, Clone)]
 pub struct WasmcloudOpts {
     /// wasmCloud host version to download, e.g. `v0.55.0`. See https://github.com/wasmCloud/wasmcloud/releases for releases
-    #[clap(long = "wasmcloud-version", default_value = WASMCLOUD_HOST_VERSION, env = "WASMCLOUD_VERSION")]
+    #[clap(
+        long = "wasmcloud-version", default_value = WASMCLOUD_HOST_VERSION, env = "WASMCLOUD_VERSION"
+    )]
     pub wasmcloud_version: String,
 
     /// A unique identifier for a lattice, frequently used within NATS topics to isolate messages among different lattices
@@ -167,7 +172,9 @@ pub struct WasmcloudOpts {
     pub rpc_seed: Option<String>,
 
     /// Timeout in milliseconds for all RPC calls
-    #[clap(long = "rpc-timeout-ms", default_value = DEFAULT_RPC_TIMEOUT_MS, env = WASMCLOUD_RPC_TIMEOUT_MS)]
+    #[clap(
+        long = "rpc-timeout-ms", default_value = DEFAULT_RPC_TIMEOUT_MS, env = WASMCLOUD_RPC_TIMEOUT_MS
+    )]
     pub rpc_timeout_ms: Option<u64>,
 
     /// A user JWT to use to authenticate to NATS for RPC messages
@@ -223,7 +230,9 @@ pub struct WasmcloudOpts {
     pub cluster_issuers: Option<Vec<String>>,
 
     /// Delay, in milliseconds, between requesting a provider shut down and forcibly terminating its process
-    #[clap(long = "provider-delay", default_value = DEFAULT_PROV_SHUTDOWN_DELAY_MS, env = WASMCLOUD_PROV_SHUTDOWN_DELAY_MS)]
+    #[clap(
+        long = "provider-delay", default_value = DEFAULT_PROV_SHUTDOWN_DELAY_MS, env = WASMCLOUD_PROV_SHUTDOWN_DELAY_MS
+    )]
     pub provider_delay: u32,
 
     /// Determines whether OCI images tagged latest are allowed to be pulled from OCI registries and started
@@ -243,7 +252,9 @@ pub struct WasmcloudOpts {
     pub config_service_enabled: bool,
 
     /// Denotes if a wasmCloud host should allow starting components from the file system
-    #[clap(long = "allow-file-load", default_value = DEFAULT_ALLOW_FILE_LOAD, env = WASMCLOUD_ALLOW_FILE_LOAD)]
+    #[clap(
+        long = "allow-file-load", default_value = DEFAULT_ALLOW_FILE_LOAD, env = WASMCLOUD_ALLOW_FILE_LOAD
+    )]
     pub allow_file_load: Option<bool>,
 
     /// Enable JSON structured logging from the wasmCloud host
@@ -258,7 +269,9 @@ pub struct WasmcloudOpts {
     pub label: Option<Vec<String>>,
 
     /// Controls the verbosity of JSON structured logs from the wasmCloud host
-    #[clap(long = "log-level", alias = "structured-log-level", default_value = DEFAULT_STRUCTURED_LOG_LEVEL, env = WASMCLOUD_LOG_LEVEL)]
+    #[clap(
+        long = "log-level", alias = "structured-log-level", default_value = DEFAULT_STRUCTURED_LOG_LEVEL, env = WASMCLOUD_LOG_LEVEL
+    )]
     pub structured_log_level: String,
 
     /// Enables IPV6 addressing for wasmCloud hosts
@@ -438,7 +451,7 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
         let host_state = running_host_count(&ctl_client, &install_dir).await?;
         if host_state == WasmCloudHostState::NotRunning {
             eprintln!("🟨 Pid file {:?} exists but no hosts are running. Removing Pid file and proceeding with \"wash up\"",
-            install_dir.join(WASMCLOUD_PID_FILE));
+                      install_dir.join(WASMCLOUD_PID_FILE));
             tokio::fs::remove_file(install_dir.join(WASMCLOUD_PID_FILE)).await?;
         } else if host_state == WasmCloudHostState::MultipleRunning {
             bail!("🟨 Multiple hosts are running. Please use --multi-local to start another");
