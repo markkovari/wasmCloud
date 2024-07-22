@@ -3,7 +3,6 @@ use std::fmt::Write;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -12,7 +11,6 @@ use std::sync::{
 use anyhow::{anyhow, bail, Context, Result};
 use async_nats::Client;
 use clap::Parser;
-use semver::Version;
 use serde_json::{json, Value};
 use sysinfo::{System, SystemExt};
 
@@ -21,7 +19,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Child,
 };
-use tracing::{info, warn};
+use tracing::warn;
 use wash_lib::app::{load_app_manifest, AppManifest, AppManifestSource};
 use wash_lib::cli::{CommandOutput, OutputKind};
 use wash_lib::config::{
@@ -29,7 +27,6 @@ use wash_lib::config::{
 };
 use wash_lib::context::fs::ContextDir;
 use wash_lib::context::ContextManager;
-use wash_lib::start::new_patch_version_of_after;
 use wash_lib::start::{
     ensure_nats_server, ensure_wadm, ensure_wasmcloud, find_wasmcloud_binary, nats_pid_path,
     start_nats_server, start_wadm, start_wasmcloud_host, NatsConfig, WadmConfig, WADM_PID,
