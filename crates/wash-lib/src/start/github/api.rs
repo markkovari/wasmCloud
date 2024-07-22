@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use wasmcloud_core::tls::NativeRootsExt;
@@ -10,64 +11,43 @@ const GITHUB_PER_PAGE: u32 = 100;
 const VERSION_FETCHER_CLIENT_USER_AGENT: &str =
     concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
-async fn get_sorted_releases_of(
+
+/// get_chronologically_sorted_releases_of_after returns with a list of chronologically ordered (latest first)
+/// with the provided after_version being excluded
+async fn get_chronologically_sorted_releases_of_after(
     owner: String,
     repo: String,
-    fallback: String,
+    after_version: semver::Version,
 ) -> Result<Vec<GitHubRelease>, anyhow::Error> {
-    let releases_of_repo = fetch_latest_releases(owner, repo, fallback).await?;
-
+    let releases_of_repo = fetch_latest_releases(owner, repo, after_version).await?;
     let mut releases_of_repo = releases_of_repo.into_iter().collect::<Vec<GitHubRelease>>();
-    releases_of_repo.sort_by(|a, b| a.published_at.cmp(&b.published_at));
+    releases_of_repo.sort_by(|a, b| b.published_at.cmp(&a.published_at));
     Ok(releases_of_repo)
 }
 
-pub async fn get_newest_patch_releases(
-    current_wadm_version: semver::Version,
-    wadm_releases: Vec<GitHubRelease>,
-    current_wasmcloud_version: semver::Version,
-    wasmcloud_releases: Vec<GitHubRelease>,
-) -> (Option<GitHubRelease>, Option<GitHubRelease>) {
-    let newest_wadm_patch_versions = wadm_releases
-        .into_iter()
-        .take_while(|release| match release.is_main_release() {
-            Some(version) => {
-                version.major == current_wadm_version.major
-                    && version.minor == current_wadm_version.minor
-                    && version.patch > current_wadm_version.patch
-            }
-            None => false,
-        })
-        .collect::<Vec<GitHubRelease>>();
 
-    let newest_wasmcloud_patch_versions = wasmcloud_releases
-        .into_iter()
-        .take_while(|release| match release.is_main_release() {
-            Some(version) => {
-                version.major == current_wasmcloud_version.major
-                    && version.minor == current_wasmcloud_version.minor
-                    && version.patch > current_wasmcloud_version.patch
-            }
-            None => false,
-        })
-        .collect::<Vec<GitHubRelease>>();
-
-    (
-        newest_wadm_patch_versions.into_iter().next(),
-        newest_wasmcloud_patch_versions.into_iter().next(),
-    )
+/// main_releases_of_after returns filters the get_chronologically_sorted_releases_of_after
+/// by their version. The target version is a "v"-prefixed semver and no other one
+async fn new_patch_releases_of_after(
+    owner: String,
+    repo: String,
+    after_version: semver::Version,
+) -> Result<Vec<GitHubRelease>, anyhow::Error> {
+    let releases = get_chronologically_sorted_releases_of_after(owner, repo, after_version).await?;
+    let main_releases = releases.into_iter().filter(|release| release.get_main_artifact_release().is_some()).collect::<Vec<GitHubRelease>>();
+    Ok(main_releases)
 }
 
 /// GitHubRelease represents the necessary fields to determine wadm and/or wasmCloud
+/// GitHub release (https://developer.github.com/v3/repos/releases/) object
 /// has new patch version available. The fields are based on the response from the
-/// GitHub release (https://developer.github.com/v3/repos/releases/).
-///
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GitHubRelease {
     pub tag_name: String,
     pub name: String,
     #[serde(with = "github_date_format")]
     pub published_at: DateTimeUtc,
+    // TODO: ask if we need drafts and/or prerelease ones
     pub draft: bool,
     pub prerelease: bool,
 }
@@ -78,63 +58,59 @@ impl PartialEq for GitHubRelease {
 }
 
 impl GitHubRelease {
-    pub fn is_not_draft_or_pre_release(&self) -> bool {
-        !self.draft && !self.prerelease
-    }
-    pub fn is_main_release(&self) -> Option<semver::Version> {
-        let tag_name = self.tag_name.strip_prefix("v").unwrap_or(&self.tag_name);
-        // TODO: should be a simple call to map to option
-        match semver::Version::parse(tag_name) {
-            Ok(v) => Some(v),
-            Err(_) => None,
+    pub fn get_main_artifact_release(&self) -> Option<semver::Version> {
+        match self.tag_name.strip_prefix("v") {
+            Some(v) => match semver::Version::from_str(v) {
+                Ok(v) => Some(v),
+                Err(_) => None
+            },
+            None => None
         }
     }
 }
 
 /// Returns the URL to fetch the latest release from the GitHub repository.
 /// doc: https://developer.github.com/v3/repos/releases/#get-the-latest-release
-fn format_latest_releases(owner: String, repo: String, page: u32) -> String {
+fn format_latest_releases_url(owner: String, repo: String, page: u8) -> String {
     format!(
         "https://api.github.com/repos/{}/{}/releases?page={}&per_page={}",
         owner, repo, page, GITHUB_PER_PAGE
     )
 }
+
 async fn fetch_latest_releases(
     owner: String,
     repo: String,
-    fallback: String,
+    latest_interested: semver::Version,
 ) -> Result<Vec<GitHubRelease>, reqwest::Error> {
     let client = reqwest::ClientBuilder::default()
         .user_agent(VERSION_FETCHER_CLIENT_USER_AGENT)
         .with_native_certificates()
         .build()
         .expect("failed to build HTTP client");
-
-    let page = 0u32;
-    println!("fetching releases from github, current page: {}", page);
-    let url = format_latest_releases(owner, repo, page);
-    let mut releases = Vec::new();
-    loop {
+    let mut page = 0u8;
+    let mut releases: Vec<GitHubRelease> = Vec::new();
+    'fetch_loop: loop {
+        let url = format_latest_releases_url(owner.clone(), repo.clone(), page);
         let response = client.get(&url).send().await?;
         if !response.status().is_success() {
             break;
         }
-        let mut releases_on_page = response.json::<Vec<GitHubRelease>>().await?;
-        println!("releases_on_page: {:?}", releases_on_page);
-        if releases_on_page.is_empty() {
-            break;
+        let releases_on_page = response.json::<Vec<GitHubRelease>>().await?;
+        /// Last page of releases, there should be no more
+        /// Do not add every element in the page only the ones before the found latest tag
+        for release in releases_on_page.iter() {
+            if let Some(main_release) = release.get_main_artifact_release() {
+                if main_release == latest_interested {
+                    break 'fetch_loop;
+                }
+            }
+            releases.push(release.clone());
         }
         if releases_on_page.len() < GITHUB_PER_PAGE as usize {
-            break;
+            break 'fetch_loop;
         }
-        if releases_on_page
-            .clone()
-            .into_iter()
-            .any(|release: GitHubRelease| release.tag_name == fallback)
-        {
-            break;
-        }
-        releases.append(&mut releases_on_page);
+        page = page + 1;
     }
     Ok(releases)
 }
@@ -202,12 +178,12 @@ mod tests {
         assert_eq!(release.tag_name, "washboard-ui-v0.4.0");
         assert_eq!(release.name, "washboard-ui-v0.4.0");
 
-        let exptexted_date = NaiveDate::from_ymd_opt(2024, 07, 17)
+        let expected_date = NaiveDate::from_ymd_opt(2024, 07, 17)
             .unwrap()
             .and_hms_opt(16, 15, 15)
             .unwrap()
             .and_utc();
-        assert_eq!(release.published_at, exptexted_date);
+        assert_eq!(release.published_at, expected_date);
         assert_eq!(release.draft, false);
         assert_eq!(release.prerelease, false);
     }
@@ -221,7 +197,7 @@ mod tests {
             draft: false,
             prerelease: false,
         };
-        assert!(release.is_not_draft_or_pre_release());
+        assert!(release.get_main_artifact_release().is_some());
     }
 
     #[test]
@@ -233,7 +209,7 @@ mod tests {
             draft: false,
             prerelease: false,
         };
-        let version = release.is_main_release();
+        let version = release.get_main_artifact_release();
         assert!(version.is_some());
         assert_eq!(version.unwrap(), semver::Version::parse("0.4.0").unwrap());
 
@@ -244,19 +220,32 @@ mod tests {
             draft: false,
             prerelease: false,
         };
-        let version = release_with_prefix.is_main_release();
+        let version = release_with_prefix.get_main_artifact_release();
         assert!(version.is_none());
     }
 
     /// Test if the GitHubRelease struct is parsed correctly from the raw string.
-    /// Using an already "outdated" patch version to test if the sorting works correctly and comperable to the current version.
+    /// Using an already "outdated" patch version to test if the sorting works correctly and comparable to the current version.
     #[tokio::test]
+    // TODO: revisit this config, did not see the dynamic declaration, only the usage
     #[cfg_attr(not(can_reach_github_com), ignore = "github.com is not reachable")]
-    async fn test_fetching_wasmcloud_patch_versions_after_v_1_0_3() {
+    async fn test_fetching_wasm_cloud_patch_versions_after_v_1_0_3() {
         let owner = "wasmCloud".to_string();
         let repo = "wasmCloud".to_string();
-        // Use 1.0.3 as fallback version, since there is a newer version
-        let releases = get_sorted_releases_of(owner, repo, "v1.0.3".to_string()).await;
-        assert!(releases.is_ok())
+        let latest_version = semver::Version::new(1, 0, 3);
+        // Use 1.0.3 as the latest version, since there is a newer version
+        let releases = get_chronologically_sorted_releases_of_after(owner.clone(), repo.clone(), latest_version.clone()).await;
+        assert!(releases.is_ok());
+        let patch_releases = new_patch_releases_of_after(owner, repo, latest_version.clone()).await;
+        assert!(patch_releases.is_ok());
+        let patch_releases = patch_releases.unwrap();
+        for new_path_release in patch_releases {
+            let version_of_new_release = new_path_release.get_main_artifact_release();
+            assert!(version_of_new_release.is_some(), "new patch version is semver conventional versions");
+            let semver::Version { major, minor, patch, .. } = version_of_new_release.unwrap();
+            assert_eq!(latest_version.major, major, "major version is not changed");
+            assert_eq!(latest_version.minor, minor, "major version is not changed");
+            assert!(latest_version.patch < patch, "major version is bigger");
+        }
     }
 }
