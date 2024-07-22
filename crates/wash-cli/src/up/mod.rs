@@ -29,7 +29,8 @@ use wash_lib::context::fs::ContextDir;
 use wash_lib::context::ContextManager;
 use wash_lib::start::{
     ensure_nats_server, ensure_wadm, ensure_wasmcloud, find_wasmcloud_binary, nats_pid_path,
-    start_nats_server, start_wadm, start_wasmcloud_host, NatsConfig, WadmConfig, WADM_PID,
+    new_patch_version_of_after_string, start_nats_server, start_wadm, start_wasmcloud_host,
+    NatsConfig, WadmConfig, WADM_PID,
 };
 use wasmcloud_control_interface::{Client as CtlClient, ClientBuilder as CtlClientBuilder};
 
@@ -519,7 +520,33 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
             .into_std()
             .await;
 
-        let wadm_path = ensure_wadm(&cmd.wadm_opts.wadm_version, &install_dir).await;
+        // Check if there is a new patch version of wadm available
+
+        let new_wadm_patch_version = match new_patch_version_of_after_string(
+            "wasmCloud".to_string(),
+            "wadm".to_string(),
+            cmd.wadm_opts.wadm_version.clone(),
+        )
+        .await
+        {
+            Ok(version) => version,
+            Err(_) => {
+                eprintln!(
+                    "🟨 Couldn't get latest patch wadm version, using the previously version: {}",
+                    cmd.wadm_opts.wadm_version
+                );
+                None
+            }
+        };
+
+        // If there is a new patch version of wadm available, update the version and download it
+        // if failed fallback to the defined version
+        let wadm_version = match new_wadm_patch_version {
+            Some(version) => version.to_string(),
+            None => cmd.wadm_opts.wadm_version.clone(),
+        };
+
+        let wadm_path = ensure_wadm(&wadm_version, &install_dir).await;
         match wadm_path {
             Ok(path) => {
                 let wadm_child = start_wadm(&path, wadm_log_file, Some(config)).await;
@@ -531,7 +558,7 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
                 }
             }
             Err(e) => {
-                let wadm_version: String = cmd.wadm_opts.wadm_version.clone();
+                let wadm_version: String = wadm_version.clone();
                 eprintln!("🟨 Couldn't download wadm {wadm_version}: {e}");
                 if e.to_string().contains("Text file busy") {
                     eprintln!("🛟 Please ensure there aren't any leftover wadm processes");
@@ -539,6 +566,27 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
                 None
             }
         }
+
+        // let wadm_path = ensure_wadm(&cmd.wadm_opts.wadm_version, &install_dir).await;
+        // match wadm_path {
+        //     Ok(path) => {
+        //         let wadm_child = start_wadm(&path, wadm_log_file, Some(config)).await;
+        //         if let Err(e) = &wadm_child {
+        //             eprintln!("🟨 Couldn't start wadm: {e}");
+        //             None
+        //         } else {
+        //             Some(wadm_child.unwrap())
+        //         }
+        //     }
+        //     Err(e) => {
+        //         let wadm_version: String = cmd.wadm_opts.wadm_version.clone();
+        //         eprintln!("🟨 Couldn't download wadm {wadm_version}: {e}");
+        //         if e.to_string().contains("Text file busy") {
+        //             eprintln!("🛟 Please ensure there aren't any leftover wadm processes");
+        //         }
+        //         None
+        //     }
+        // }
     } else {
         None
     };

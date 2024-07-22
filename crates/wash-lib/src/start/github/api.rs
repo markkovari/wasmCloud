@@ -43,11 +43,29 @@ async fn new_patch_releases_of_after(
 // const WASMCLOUD_OWNER: &str = "wasmCloud";
 // const WASMCLOUD_REPO: &str = "wasmCloud";
 
-pub async fn new_patch_version_of_after(
+async fn new_patch_version_of_after(
     owner: String,
     repo: String,
     after_version: Version,
 ) -> Result<Option<Version>, Error> {
+    return match new_patch_releases_of_after(owner, repo, after_version).await {
+        Ok(patches) => match patches.first() {
+            Some(patch) => Ok(patch.get_main_artifact_release()),
+            None => Ok(None),
+        },
+        _ => Ok(None),
+    };
+}
+
+pub async fn new_patch_version_of_after_string(
+    owner: String,
+    repo: String,
+    after_version: String,
+) -> Result<Option<Version>, Error> {
+    let after_version = match Version::parse(&after_version) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
     return match new_patch_releases_of_after(owner, repo, after_version).await {
         Ok(patches) => match patches.first() {
             Some(patch) => Ok(patch.get_main_artifact_release()),
@@ -92,7 +110,7 @@ impl GitHubRelease {
 
 /// Returns the URL to fetch the latest release from the GitHub repository.
 /// doc: https://developer.github.com/v3/repos/releases/#get-the-latest-release
-fn format_latest_releases_url(owner: String, repo: String, page: u8) -> String {
+fn format_latest_releases_url(owner: String, repo: String, page: u32) -> String {
     format!(
         "https://api.github.com/repos/{}/{}/releases?page={}&per_page={}",
         owner, repo, page, GITHUB_PER_PAGE
@@ -109,7 +127,7 @@ async fn fetch_latest_releases(
         .with_native_certificates()
         .build()
         .expect("failed to build HTTP client");
-    let mut page = 0u8;
+    let mut page = 0u32;
     let mut releases: Vec<GitHubRelease> = Vec::new();
     'fetch_loop: loop {
         let url = format_latest_releases_url(owner.clone(), repo.clone(), page);
