@@ -578,35 +578,50 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
                 None
             }
         }
-
-        // let wadm_path = ensure_wadm(&cmd.wadm_opts.wadm_version, &install_dir).await;
-        // match wadm_path {
-        //     Ok(path) => {
-        //         let wadm_child = start_wadm(&path, wadm_log_file, Some(config)).await;
-        //         if let Err(e) = &wadm_child {
-        //             eprintln!("🟨 Couldn't start wadm: {e}");
-        //             None
-        //         } else {
-        //             Some(wadm_child.unwrap())
-        //         }
-        //     }
-        //     Err(e) => {
-        //         let wadm_version: String = cmd.wadm_opts.wadm_version.clone();
-        //         eprintln!("🟨 Couldn't download wadm {wadm_version}: {e}");
-        //         if e.to_string().contains("Text file busy") {
-        //             eprintln!("🛟 Please ensure there aren't any leftover wadm processes");
-        //         }
-        //         None
-        //     }
-        // }
+        // TODO: add the fallback, not sure yet how :|
     } else {
         None
     };
 
+    // Check if there is a new patch version of wadm available
+    println!(
+        "🔍Looking for new patch version after wasmcloud {:?}",
+        wasmcloud_opts.wasmcloud_version
+    );
+    let new_wasmcloud_patch_version: Option<String> = match new_patch_version_of_after_string(
+        "wasmCloud".to_string(),
+        "wasmCLoud".to_string(),
+        wasmcloud_opts.wasmcloud_version.clone(),
+    )
+    .await
+    {
+        Ok(version) => match version {
+            Some(v) => Some(v.to_string()),
+            None => None,
+        },
+        Err(_) => {
+            eprintln!(
+                "🟨 Couldn't get latest patch wasmCloud version, using the previously version: {}",
+                cmd.wadm_opts.wadm_version
+            );
+            None
+        }
+    };
+    if new_wasmcloud_patch_version.is_some() {
+        println!(
+            "🩹 Found new patch version of wasmCloud: {:?}",
+            new_wasmcloud_patch_version.clone()
+        );
+    }
+
     // Download wasmCloud if not already installed
     let wasmcloud_executable = if !wasmcloud_opts.start_only {
         spinner.update_spinner_message(" Downloading wasmCloud ...".to_string());
-        ensure_wasmcloud(&wasmcloud_opts.wasmcloud_version, &install_dir).await?
+        if let Some(new_version) = new_wasmcloud_patch_version {
+            ensure_wasmcloud(&format!("v{}", &new_version), &install_dir).await?
+        } else {
+            ensure_wasmcloud(&wasmcloud_opts.wasmcloud_version.clone(), &install_dir).await?
+        }
     } else if let Some(wasmcloud_bin) =
         find_wasmcloud_binary(&install_dir, &wasmcloud_opts.wasmcloud_version).await
     {
