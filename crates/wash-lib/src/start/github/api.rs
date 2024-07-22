@@ -62,6 +62,7 @@ pub async fn new_patch_version_of_after_string(
     repo: String,
     after_version: String,
 ) -> Result<Option<Version>, Error> {
+    let after_version = after_version.strip_prefix("v").unwrap_or(&after_version);
     let after_version = match Version::parse(&after_version) {
         Ok(v) => v,
         Err(_) => return Ok(None),

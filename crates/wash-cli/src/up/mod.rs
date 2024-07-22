@@ -521,15 +521,21 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
             .await;
 
         // Check if there is a new patch version of wadm available
-
-        let new_wadm_patch_version = match new_patch_version_of_after_string(
+        println!(
+            "🔍Looking for new patch version after {:?}",
+            cmd.wadm_opts.wadm_version.clone()
+        );
+        let new_wadm_patch_version: Option<String> = match new_patch_version_of_after_string(
             "wasmCloud".to_string(),
             "wadm".to_string(),
             cmd.wadm_opts.wadm_version.clone(),
         )
         .await
         {
-            Ok(version) => version,
+            Ok(version) => match version {
+                Some(v) => Some(v.to_string()),
+                None => None,
+            },
             Err(_) => {
                 eprintln!(
                     "🟨 Couldn't get latest patch wadm version, using the previously version: {}",
@@ -538,11 +544,17 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
                 None
             }
         };
+        if new_wadm_patch_version.is_some() {
+            println!(
+                "🩹 Found new patch version of wadm: {:?}",
+                new_wadm_patch_version.clone()
+            );
+        }
 
         // If there is a new patch version of wadm available, update the version and download it
         // if failed fallback to the defined version
         let wadm_version = match new_wadm_patch_version {
-            Some(version) => version.to_string(),
+            Some(version) => format!("v{}", version.to_string()),
             None => cmd.wadm_opts.wadm_version.clone(),
         };
 
