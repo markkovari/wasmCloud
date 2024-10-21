@@ -1,6 +1,6 @@
 [package]
 name = "wash-cli"
-version = "0.34.1"
+version = "0.35.0"
 categories = ["wasm", "command-line-utilities"]
 description = "wasmCloud Shell (wash) CLI tool"
 keywords = ["webassembly", "wasmcloud", "wash", "cli"]
@@ -19,26 +19,31 @@ anstyle = { workspace = true }
 anyhow = { workspace = true, features = ["backtrace"] }
 async-compression = { workspace = true, features = ["tokio", "gzip"] }
 async-nats = { workspace = true }
-async-nats-0_33 = { package = "async-nats", version = "0.33", default-features = false }
 bytes = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true, features = ["cargo", "derive", "env", "std", "string"] }
+clap = { workspace = true, features = [
+    "cargo",
+    "derive",
+    "env",
+    "std",
+    "string",
+] }
 clap_complete = { workspace = true }
 clap-markdown = { workspace = true }
 cloudevents-sdk = { workspace = true }
 console = { workspace = true }
 crossterm = { workspace = true, features = ["events", "windows"] }
 docker_credential = { workspace = true }
+etcetera = { workspace = true }
 file-guard = { workspace = true }
 futures = { workspace = true }
-home = { workspace = true }
 http = { workspace = true }
 humantime.workspace = true
 indicatif = { workspace = true }
 nix = { workspace = true, features = ["signal"] }
 nkeys = { workspace = true, features = ["xkeys"] }
 notify = { workspace = true }
-oci-distribution = { workspace = true, features = ["rustls-tls"] }
+oci-client = { workspace = true, features = ["rustls-tls"] }
 oci-wasm = { workspace = true, features = ["rustls-tls"] }
 once_cell = { workspace = true }
 provider-archive = { workspace = true }
@@ -85,7 +90,9 @@ wash-lib = { workspace = true, features = [
     "start",
     "plugin",
 ] }
-wasmcloud-control-interface = { version = "1" } # TODO: Revert once wadm is published with async-nats 0.36
+wasm-pkg-client = { workspace = true }
+wasm-pkg-core = { workspace = true }
+wasmcloud-control-interface = { workspace = true }
 wasmcloud-core = { workspace = true }
 wasmcloud-provider-sdk = { workspace = true }
 wasmcloud-secrets-types = { workspace = true }
@@ -93,7 +100,7 @@ weld-codegen = { workspace = true, features = ["wasmbus"] }
 which = { workspace = true }
 wit-bindgen-wrpc = { workspace = true }
 wit-parser = { workspace = true }
-wrpc-interface-http = { workspace = true, features = [ "http-body" ] }
+wrpc-interface-http = { workspace = true, features = ["http-body"] }
 wrpc-transport = { workspace = true }
 wrpc-transport-nats = { workspace = true }
 
@@ -106,6 +113,12 @@ reqwest = { workspace = true }
 serial_test = { workspace = true }
 sysinfo = { workspace = true }
 wat = { workspace = true }
+wit-component = { workspace = true }
+wasm-pkg-client = { workspace = true }
 
 [build-dependencies]
 tokio = { workspace = true, features = ["macros", "net"] }
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{name}-v{version}/wash-{ target }{ binary-ext }"
+pkg-fmt = "bin"

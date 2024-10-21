@@ -21,7 +21,7 @@
   inputs.nixlib.url = "github:nix-community/nixpkgs.lib";
   inputs.wit-deps.inputs.nixify.follows = "nixify";
   inputs.wit-deps.inputs.nixlib.follows = "nixlib";
-  inputs.wit-deps.url = "github:bytecodealliance/wit-deps/v0.3.5";
+  inputs.wit-deps.url = "github:bytecodealliance/wit-deps/v0.4.0";
 
   outputs = {
     nixify,
@@ -46,13 +46,17 @@
         in
           [
             ".devcontainer"
+            ".dockerignore"
             ".envrc"
             ".github"
             ".gitignore"
             "ADOPTERS.md"
             "adr"
             "awesome-wasmcloud"
+            "brand"
+            "CHANGELOG.md"
             "chart"
+            "charts"
             "CODE_OF_CONDUCT.md"
             "CODEOWNERS"
             "CONTRIBUTING.md"
@@ -71,8 +75,12 @@
             "garnix.yaml"
             "GOVERNANCE.md"
             "LICENSE"
+            "MAINTAINERS.md"
             "OWNERS"
+            "performance.md"
             "README.md"
+            "RELEASE.md"
+            "RELEASE_RUNBOOK.md"
             "ROADMAP.md"
             "rust-toolchain.toml"
             "SECURITY.md"
@@ -88,7 +96,7 @@
         targets.powerpc64le-unknown-linux-gnu = false;
         targets.s390x-unknown-linux-gnu = false;
         targets.wasm32-unknown-unknown = false;
-        targets.wasm32-wasi = false;
+        targets.wasm32-wasip1 = false;
 
         build.packages = [
           "wash-cli"

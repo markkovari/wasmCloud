@@ -25,7 +25,7 @@ pub const DEFAULT_CTX_DIR_NAME: &str = "contexts";
 
 /// Get the path to the `.wash` configuration directory. Creates the directory if it does not exist.
 pub fn cfg_dir() -> Result<PathBuf> {
-    let home = home::home_dir().context("no home directory found. Please set $HOME")?;
+    let home = etcetera::home_dir().context("no home directory found. Please set $HOME")?;
 
     let wash = home.join(WASH_DIR);
 
@@ -73,7 +73,7 @@ pub struct WashConnectionOptions {
     pub ctl_seed: Option<String>,
 
     /// Credsfile for CTL authentication. Combines ctl_seed and ctl_jwt.
-    /// See https://docs.nats.io/using-nats/developer/connecting/creds for details.
+    /// See <https://docs.nats.io/using-nats/developer/connecting/creds> for details.
     pub ctl_credsfile: Option<PathBuf>,
 
     /// Path to a file containing a CA certificate to use for TLS connections

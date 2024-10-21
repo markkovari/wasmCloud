@@ -34,7 +34,7 @@ impl From<(Option<String>, Option<String>)> for RegistryAuth {
 }
 
 #[cfg(feature = "oci")]
-impl From<&RegistryAuth> for oci_distribution::secrets::RegistryAuth {
+impl From<&RegistryAuth> for oci_client::secrets::RegistryAuth {
     fn from(auth: &crate::RegistryAuth) -> Self {
         match auth {
             crate::RegistryAuth::Basic(username, password) => {
@@ -46,7 +46,7 @@ impl From<&RegistryAuth> for oci_distribution::secrets::RegistryAuth {
 }
 
 #[cfg(feature = "oci")]
-impl From<RegistryAuth> for oci_distribution::secrets::RegistryAuth {
+impl From<RegistryAuth> for oci_client::secrets::RegistryAuth {
     fn from(auth: crate::RegistryAuth) -> Self {
         match auth {
             crate::RegistryAuth::Basic(username, password) => Self::Basic(username, password),
@@ -112,11 +112,16 @@ impl RegistryConfigBuilder {
     }
 
     pub fn build(self) -> Result<RegistryConfig> {
+        let allow_insecure = self.allow_insecure.unwrap_or_default();
         Ok(RegistryConfig {
-            reg_type: self.reg_type.context("missing reg type")?,
-            auth: self.auth.context("missing reg auth")?,
+            reg_type: self.reg_type.context("missing registry type")?,
+            auth: if allow_insecure {
+                self.auth.unwrap_or_default()
+            } else {
+                self.auth.context("missing registry auth")?
+            },
             allow_latest: self.allow_insecure.unwrap_or_default(),
-            allow_insecure: self.allow_insecure.unwrap_or_default(),
+            allow_insecure,
             additional_ca_paths: self.additional_ca_paths.unwrap_or_default(),
         })
     }

@@ -22,12 +22,12 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - name: Extract tag context
         id: ctx
         run: |
@@ -84,7 +84,7 @@ jobs:
           ./wash par insert --arch x86_64-windows --binary "./artifacts/wasmcloud-x86_64-pc-windows-msvc/bin/${{ inputs.name }}-provider.exe" "${{ inputs.name }}.par.gz"
           ./wash par inspect "${{ inputs.name }}.par.gz"
 
-      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
         with:
           name: ${{ inputs.name }}.par.gz
           path: ${{ inputs.name }}.par.gz

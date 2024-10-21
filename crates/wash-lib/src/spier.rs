@@ -68,7 +68,7 @@ impl Spier {
     ) -> Result<Self> {
         let linked_component = get_linked_components(component_id, ctl_client).await?;
 
-        let lattice = &ctl_client.lattice;
+        let lattice = ctl_client.lattice();
         let rpc_topic = format!("{lattice}.{component_id}.wrpc.>");
         let component_stream = nats_client.subscribe(rpc_topic).await?;
 
@@ -164,15 +164,19 @@ async fn get_linked_components(
         .get_links()
         .await
         .map_err(|e| anyhow::anyhow!("Unable to get links: {e:?}"))
-        .map(|response| response.response)?
+        .map(|response| response.into_data())?
         .map(|linkdefs| {
             linkdefs
                 .into_iter()
                 .filter_map(|link| {
-                    if link.source_id == component_id {
-                        Some(ProviderDetails { id: link.target })
-                    } else if link.target == component_id {
-                        Some(ProviderDetails { id: link.source_id })
+                    if link.source_id() == component_id {
+                        Some(ProviderDetails {
+                            id: link.target().to_string(),
+                        })
+                    } else if link.target() == component_id {
+                        Some(ProviderDetails {
+                            id: link.source_id().to_string(),
+                        })
                     } else {
                         None
                     }

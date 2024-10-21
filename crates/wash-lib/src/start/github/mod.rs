@@ -176,6 +176,7 @@ shutdown_lifetime 1 seconds
 "#;
 
     #[tokio::test]
+    #[cfg_attr(not(docker_available), ignore = "docker isn't available")]
     async fn test_download_client_with_proxy_settings() {
         // NOTE: This is intentional to avoid the two tests running in parallel
         // and contaminating each other's environment variables for configuring

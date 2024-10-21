@@ -34,7 +34,7 @@ spec:
     - name: custom-template
       type: capability
       properties:
-        image: file://./build/wasmcloud-example-custom-template.par.gz
+        image: file://./build/wasmcloud-provider-custom-template.par.gz
         id: custom-template
         config:
           - name: provider-config

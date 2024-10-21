@@ -1,22 +1,25 @@
 mod common;
 
-use common::{init, init_provider, init_workspace};
+use common::{init, init_path, init_workspace, load_fixture};
 
 use anyhow::{Context, Ok, Result};
 use std::env;
 use std::fs::File;
 use tokio::process::Command;
+use wasm_pkg_core::lock::LOCK_FILE_NAME;
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_rust_component_unsigned() -> Result<()> {
     let test_setup = init(
         /* component_name= */ "hello-unsigned",
         /* template_name= */ "hello-world-rust",
     )
     .await?;
-    let project_dir = test_setup.project_dir;
+    let project_dir = test_setup.project_dir.clone();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let status = test_setup
+        .base_command()
         .args(["build", "--build-only"])
         .status()
         .await
@@ -30,19 +33,53 @@ async fn integration_build_rust_component_unsigned() -> Result<()> {
         !signed_file.exists(),
         "signed file should not exist when using --build-only!"
     );
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_rust_component_signed() -> Result<()> {
-    let test_setup = init(
+    // We test a dep from git above, so this tests with a local path so we can test local changes
+    let test_setup = init_path(
         /* component_name= */ "hello",
-        /* template_name= */ "hello-world-rust",
+        /* template_name= */ "crates/wash-cli/tests/fixtures/dog-fetcher",
     )
     .await?;
-    let project_dir = test_setup.project_dir;
+    let project_dir = test_setup.project_dir.clone();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let status = test_setup
+        .base_command()
+        .args(["build"])
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("Failed to build project")?;
+
+    assert!(status.success());
+    let unsigned_file = project_dir.join("build/dog_fetcher.wasm");
+    assert!(unsigned_file.exists(), "unsigned file not found!");
+    let signed_file = project_dir.join("build/dog_fetcher_s.wasm");
+    assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
+async fn integration_build_rust_component_with_existing_deps_signed() -> Result<()> {
+    let test_setup = init_path(
+        /* component_name= */ "hello",
+        /* template_name= */
+        "crates/wash-cli/tests/fixtures/old-examples/http-hello-world-rust",
+    )
+    .await?;
+    let project_dir = test_setup.project_dir.clone();
+
+    let status = test_setup
+        .base_command()
         .args(["build"])
         .kill_on_drop(true)
         .status()
@@ -54,10 +91,69 @@ async fn integration_build_rust_component_signed() -> Result<()> {
     assert!(unsigned_file.exists(), "unsigned file not found!");
     let signed_file = project_dir.join("build/http_hello_world_s.wasm");
     assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
+async fn integration_build_with_logging_interface() -> Result<()> {
+    // We test a dep from git above, so this tests with a local path so we can test local changes
+    let test_setup = load_fixture("unversioned-logging").await?;
+    let project_dir = test_setup.project_dir.clone();
+
+    let status = test_setup
+        .base_command()
+        .args(["build"])
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("Failed to build project")?;
+
+    assert!(status.success());
+    let unsigned_file = project_dir.join("build/blobby.wasm");
+    assert!(unsigned_file.exists(), "unsigned file not found!");
+    let signed_file = project_dir.join("build/blobby_s.wasm");
+    assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
+    Ok(())
+}
+
+#[tokio::test]
+async fn integration_build_rust_component_with_no_fetch() -> Result<()> {
+    let test_setup = init_path(
+        /* component_name= */ "hello",
+        /* template_name= */
+        "crates/wash-cli/tests/fixtures/old-examples/http-hello-world-rust",
+    )
+    .await?;
+    let project_dir = test_setup.project_dir.clone();
+
+    let status = test_setup
+        .base_command()
+        .args(["build", "--skip-fetch"])
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("Failed to build project")?;
+
+    assert!(status.success());
+    let unsigned_file = project_dir.join("build/http_hello_world.wasm");
+    assert!(unsigned_file.exists(), "unsigned file not found!");
+    let signed_file = project_dir.join("build/http_hello_world_s.wasm");
+    assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(
+        !lock_file.exists(),
+        "lock file should not have been generated!"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_rust_component_signed_with_signing_keys_directory_configuration(
 ) -> Result<()> {
     let test_setup = init(
@@ -65,18 +161,17 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
         /* template_name= */ "hello-world-rust",
     )
     .await?;
-    let project_dir = test_setup.project_dir;
-    env::set_current_dir(&project_dir)?;
-    env::set_var("RUST_LOG", "debug");
+    let project_dir = test_setup.project_dir.clone();
 
     // base case: no keys directory configured
-    let mut expected_default_key_dir = home::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Unable to determine the user's home directory"))?;
+    let mut expected_default_key_dir = etcetera::home_dir()?;
     expected_default_key_dir.push(".wash/keys");
 
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build"])
         .stderr(std::process::Stdio::piped())
+        .env("RUST_LOG", "debug")
         .kill_on_drop(true)
         .spawn()
         .expect("Failed to build project");
@@ -100,9 +195,11 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
 
     // case: keys directory configured via cli arg --keys-directory
     let key_directory = project_dir.join("batmankeys").to_string_lossy().to_string();
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build", "--keys-directory", &key_directory])
         .stderr(std::process::Stdio::piped())
+        .env("RUST_LOG", "debug")
         .kill_on_drop(true)
         .spawn()
         .expect("Failed to build project");
@@ -122,13 +219,15 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
         .join("spidermankeys")
         .to_string_lossy()
         .to_string();
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args([
             "build",
             "--keys-directory",
             &key_directory,
             "--disable-keygen",
         ])
+        .env("RUST_LOG", "debug")
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -147,9 +246,11 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
 
     // case: keys directory configured via env var WASH_KEYS
     let key_directory = project_dir.join("flashkeys").to_string_lossy().to_string();
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build"])
         .env("WASH_KEYS", &key_directory)
+        .env("RUST_LOG", "debug")
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -186,9 +287,11 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
     .await
     .context("failed to update wasmcloud.toml file content for test case")?;
 
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build"])
         .stderr(std::process::Stdio::piped())
+        .env("RUST_LOG", "debug")
         .kill_on_drop(true)
         .spawn()
         .expect("Failed to build project");
@@ -209,8 +312,10 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
         .to_string_lossy()
         .to_string();
 
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build", "--keys-directory", &key_directory])
+        .env("RUST_LOG", "debug")
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -234,9 +339,11 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
         .to_string_lossy()
         .to_string();
 
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build", "--keys-directory", &key_directory])
         .env("WASH_KEYS", &env_key_directory)
+        .env("RUST_LOG", "debug")
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -254,9 +361,11 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
 
     // case when keys directory is configured via env var $WASH_KEYS and wasmcloud.toml. env var should take precedence
     let env_key_directory = project_dir.join("orionkeys").to_string_lossy().to_string();
-    let cmd = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let cmd = test_setup
+        .base_command()
         .args(["build"])
         .env("WASH_KEYS", &env_key_directory)
+        .env("RUST_LOG", "debug")
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
@@ -276,13 +385,14 @@ async fn integration_build_rust_component_signed_with_signing_keys_directory_con
 }
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_rust_component_in_workspace_unsigned() -> Result<()> {
     let test_setup = init_workspace(vec![/* component_names= */ "hello-1", "hello-2"]).await?;
     let project_dir = test_setup.project_dirs.first().unwrap();
-    std::env::set_current_dir(project_dir)?;
 
     let status = Command::new(env!("CARGO_BIN_EXE_wash"))
         .args(["build", "--build-only"])
+        .current_dir(project_dir)
         .kill_on_drop(true)
         .status()
         .await
@@ -300,15 +410,17 @@ async fn integration_build_rust_component_in_workspace_unsigned() -> Result<()> 
 }
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_tinygo_component_unsigned() -> Result<()> {
     let test_setup = init(
         /* component_name= */ "hello-world-tinygo",
         /* template_name= */ "hello-world-tinygo",
     )
     .await?;
-    let project_dir = test_setup.project_dir;
+    let project_dir = test_setup.project_dir.clone();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let status = test_setup
+        .base_command()
         .args(["build", "--build-only"])
         .kill_on_drop(true)
         .status()
@@ -323,19 +435,52 @@ async fn integration_build_tinygo_component_unsigned() -> Result<()> {
         !signed_file.exists(),
         "signed file should not exist when using --build-only!"
     );
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_tinygo_component_signed() -> Result<()> {
-    let test_setup = init(
+    let test_setup = init_path(
         /* component_name= */ "hello-world-tinygo",
-        /* template_name= */ "hello-world-tinygo",
+        /* template_name= */ "examples/golang/components/http-client-tinygo",
     )
     .await?;
-    let project_dir = test_setup.project_dir;
+    let project_dir = test_setup.project_dir.clone();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_wash"))
+    let status = test_setup
+        .base_command()
+        .args(["build"])
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("Failed to build project")?;
+
+    assert!(status.success());
+    let unsigned_file = project_dir.join("build/http-client-tinygo.wasm");
+    assert!(unsigned_file.exists(), "unsigned file not found!");
+    let signed_file = project_dir.join("build/http_client_tinygo_s.wasm");
+    assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
+async fn integration_build_tinygo_component_with_existing_deps_signed() -> Result<()> {
+    let test_setup = init_path(
+        /* component_name= */ "hello-world-tinygo",
+        /* template_name= */
+        "crates/wash-cli/tests/fixtures/old-examples/http-hello-world-go",
+    )
+    .await?;
+    let project_dir = test_setup.project_dir.clone();
+
+    let status = test_setup
+        .base_command()
         .args(["build"])
         .kill_on_drop(true)
         .status()
@@ -347,10 +492,13 @@ async fn integration_build_tinygo_component_signed() -> Result<()> {
     assert!(unsigned_file.exists(), "unsigned file not found!");
     let signed_file = project_dir.join("build/http_hello_world_s.wasm");
     assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_build_handles_dashed_names() -> Result<()> {
     let component_name = "dashed-component";
     // This tests runs against a temp directory since cargo gets confused
@@ -392,41 +540,118 @@ async fn integration_build_handles_dashed_names() -> Result<()> {
     Ok(())
 }
 
+/// Ensure that wash build can handle absolute and relative paths changing for the
+/// project directory, build directory, WIT directory, and wasmcloud.toml file.
 #[tokio::test]
-async fn integration_build_provider_debug_mode() -> Result<()> {
-    let test_setup = init_provider(
-        /* provider_name= */ "hello-world",
-        /* template_name= */ "messaging-nats",
+#[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
+async fn integration_build_tinygo_component_separate_paths() -> Result<()> {
+    let test_setup = init_path(
+        /* component_name= */ "hello-world-tinygo",
+        /* template_name= */ "examples/golang/components/http-client-tinygo",
     )
     .await?;
+    let project_dir = test_setup.project_dir.clone();
 
-    let project_dir = test_setup.project_dir;
+    // Change directory into the project directory
+    std::env::set_current_dir(&project_dir).context("failed to change to project dir")?;
 
+    // Rename the WIT directory
+    tokio::fs::rename("wit", "wow")
+        .await
+        .context("failed to rename wit directory")?;
+    // Move the wasmcloud.toml to a different directory
+    tokio::fs::remove_file("wasmcloud.toml")
+        .await
+        .context("failed to remove wasmcloud.toml")?;
+    tokio::fs::create_dir("config")
+        .await
+        .context("failed to create config directory")?;
     tokio::fs::write(
-        &project_dir.join("wasmcloud.toml"),
+        "config/wasmcloud.toml",
         r#"
-    name = "Messaging NATS"
-    language = "rust"
-    type = "provider"
+    name = "tinygo-moved"
+    version = "0.1.0"
+    language = "tinygo"
+    type = "component"
+    path = "../"
+    wit = "wow"
+    build = "artifacts"
     
-    [provider]
-    vendor = "wasmcloud"
-
-    [rust]
-    debug = true
+    [component]
+    wit_world = "hello"
+    wasm_target = "wasm32-wasi"
     "#,
     )
     .await
     .context("failed to update wasmcloud.toml file content for test case")?;
 
-    let status = Command::new(env!("CARGO_BIN_EXE_wash"))
-        .args(["build"])
+    // Make sure the go generate command uses the `wow` WIT directory
+    let tiny_go_main_dot_go = tokio::fs::read_to_string("hello.go")
+        .await
+        .context("failed to read tinygo hello.go")?;
+    let new_main_dot_go =
+        tiny_go_main_dot_go.replace("wit-bindgen tiny-go wit", "wit-bindgen tiny-go wow");
+    tokio::fs::write("hello.go", new_main_dot_go)
+        .await
+        .context("failed to write new main.go")?;
+
+    let status = test_setup
+        .base_command()
+        .args(["build", "-p", "config/wasmcloud.toml"])
         .kill_on_drop(true)
         .status()
         .await
         .context("Failed to build project")?;
 
     assert!(status.success());
-
+    let unsigned_file = project_dir.join("artifacts/tinygo-moved.wasm");
+    assert!(unsigned_file.exists(), "unsigned file not found!");
+    let signed_file = project_dir.join("artifacts/tinygo-moved_s.wasm");
+    assert!(signed_file.exists(), "signed file not found!");
+    let lock_file = project_dir.join(LOCK_FILE_NAME);
+    assert!(lock_file.exists(), "lock file not found!");
     Ok(())
 }
+
+// TODO(thomastaylor312): Reenable this test once we have pushed all wit to OCI
+
+// #[tokio::test]
+// #[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
+// async fn integration_build_provider_debug_mode() -> Result<()> {
+//     let test_setup = init_provider(
+//         /* provider_name= */ "hello-world",
+//         /* template_name= */ "messaging-nats",
+//     )
+//     .await?;
+
+//     let project_dir = test_setup.project_dir.clone();
+
+//     tokio::fs::write(
+//         &project_dir.join("wasmcloud.toml"),
+//         r#"
+//     name = "Messaging NATS"
+//     language = "rust"
+//     type = "provider"
+
+//     [provider]
+//     vendor = "wasmcloud"
+
+//     [rust]
+//     debug = true
+//     "#,
+//     )
+//     .await
+//     .context("failed to update wasmcloud.toml file content for test case")?;
+
+//     let status = test_setup
+//         .base_command()
+//         .args(["build"])
+//         .kill_on_drop(true)
+//         .status()
+//         .await
+//         .context("Failed to build project")?;
+
+//     assert!(status.success());
+
+//     Ok(())
+// }

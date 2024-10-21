@@ -9,8 +9,11 @@
   ],
   "scripts": {
     "build": "turbo run build",
+    "dev": "turbo run dev",
     "start": "turbo run dev",
     "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "test:unit": "turbo run test:unit",
     "turbo:build": "turbo run build --cache-dir .turbo/cache",
     "turbo:dev": "turbo run dev",
     "turbo:lint": "turbo run lint",
@@ -27,9 +30,9 @@
     "@types/node": "^20.16.10",
     "@wasmcloud/prettier-config": "workspace:*",
     "eslint": "^8.57.0",
-    "eslint-config-turbo": "^2.1.2",
+    "eslint-config-turbo": "^2.1.3",
     "prettier": "^3.3.3",
-    "turbo": "^2.1.2",
-    "typescript": "^5.6.2"
+    "turbo": "^2.1.3",
+    "typescript": "^5.6.3"
   }
 }

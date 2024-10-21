@@ -5,6 +5,7 @@ use anyhow::bail;
 use clap::{self, Arg, Command, FromArgMatches, Parser, Subcommand};
 use serde_json::json;
 use tracing_subscriber::EnvFilter;
+use wash_cli::wit::WitCommand;
 use wash_lib::cli::capture::{CaptureCommand, CaptureSubcommand};
 use wash_lib::cli::claims::ClaimsCliCommand;
 use wash_lib::cli::get::GetCommand;
@@ -25,12 +26,12 @@ use wash_cli::app::{self, AppCliCommand};
 use wash_cli::build::{self, BuildCommand};
 use wash_cli::call::{self, CallCli};
 use wash_cli::cmd::config::{self, ConfigCliCommand};
+use wash_cli::cmd::dev::{self, DevCommand};
 use wash_cli::cmd::up::{self, UpCommand};
 use wash_cli::common;
 use wash_cli::completions::{self, CompletionOpts};
 use wash_cli::config::{NATS_SERVER_VERSION, WADM_VERSION, WASMCLOUD_HOST_VERSION};
 use wash_cli::ctx::{self, CtxCommand};
-use wash_cli::dev::{self, DevCommand};
 use wash_cli::down::{self, DownCommand};
 use wash_cli::drain;
 use wash_cli::generate::{self, NewCliCommand};
@@ -62,6 +63,7 @@ Build:
   dev          Start a developer loop to hot-reload a local wasmCloud component
   inspect      Inspect a capability provider or Wasm component for signing information and interfaces
   par          Create, inspect, and modify capability provider archive files
+  wit          Create wit packages and fetch wit dependencies for a component
 
 Run:
   up           Bootstrap a local wasmCloud environment
@@ -238,6 +240,9 @@ enum CliCommand {
     /// Serve a web UI for wasmCloud
     #[clap(name = "ui")]
     Ui(UiCommand),
+    /// Create wit packages and fetch wit dependencies for a component
+    #[clap(name = "wit", subcommand)]
+    Wit(WitCommand),
 }
 
 #[tokio::main]
@@ -454,6 +459,7 @@ async fn main() {
         }
         CliCommand::Up(up_cli) => up::handle_command(up_cli, output_kind).await,
         CliCommand::Ui(ui_cli) => ui::handle_command(ui_cli, output_kind).await,
+        CliCommand::Wit(wit_cli) => wit_cli.run().await,
     };
 
     std::process::exit(match res {

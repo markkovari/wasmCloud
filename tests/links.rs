@@ -5,11 +5,13 @@
 
 use core::str;
 use core::time::Duration;
+use std::sync::Arc;
 
 use std::net::Ipv4Addr;
 
 use anyhow::{bail, Context as _};
 use futures::StreamExt;
+use hyper::StatusCode;
 use tokio::try_join;
 use tracing::instrument;
 use tracing_subscriber::prelude::*;
@@ -107,18 +109,18 @@ async fn link_deletes() -> anyhow::Result<()> {
     let links = resp.into_data().unwrap();
     assert_eq!(links.len(), 3);
     for link in links.iter() {
-        match (&link.source_id, &link.name) {
+        match (link.source_id(), link.name()) {
             (id, name) if id == component_one && name == link_name_one => {
-                assert_eq!(link.target, component_two);
-                assert_eq!(link.interfaces.len(), 3);
+                assert_eq!(link.target(), component_two);
+                assert_eq!(link.interfaces().len(), 3);
             }
             (id, name) if id == component_one && name == link_name_two => {
-                assert_eq!(link.target, component_two);
-                assert_eq!(link.interfaces.len(), 3);
+                assert_eq!(link.target(), component_two);
+                assert_eq!(link.interfaces().len(), 3);
             }
             (id, name) if id == component_two && name == link_name_three => {
-                assert_eq!(link.target, component_one);
-                assert_eq!(link.interfaces.len(), 3);
+                assert_eq!(link.target(), component_one);
+                assert_eq!(link.interfaces().len(), 3);
             }
             (id, name) => bail!("unexpected link source {id} with name {name}"),
         }
@@ -318,17 +320,39 @@ async fn link_name_support() -> anyhow::Result<()> {
     .await
     .context("failed to advertise link")?;
 
-    let http_client = reqwest::Client::builder()
-        .with_native_certificates()
-        .timeout(Duration::from_secs(20))
-        .connect_timeout(Duration::from_secs(20))
-        .build()
-        .context("failed to build HTTP client")?;
+    let http_client = Arc::new(
+        reqwest::Client::builder()
+            .with_native_certificates()
+            .timeout(Duration::from_secs(20))
+            .connect_timeout(Duration::from_secs(20))
+            .build()
+            .context("failed to build HTTP client")?,
+    );
 
-    let base_url = format!("http://localhost:{http_port}");
+    let base_url = &format!("http://localhost:{http_port}");
+
     let req_one = http_client.get(format!("{base_url}/one")).send();
     let req_two = http_client.get(format!("{base_url}/two")).send();
     let req_three = http_client.get(format!("{base_url}/three")).send();
+
+    // Wait until the HTTP server is reachable
+    {
+        let http_client = http_client.clone();
+        tokio::time::timeout(Duration::from_secs(3), async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                let Ok(resp) = http_client.get(base_url).send().await else {
+                    continue;
+                };
+                // If the response is at least successful then we can return
+                if resp.status() == StatusCode::NOT_FOUND {
+                    return;
+                }
+            }
+        })
+        .await
+        .context("failed to access")?;
+    }
 
     let (res_one, res_two, res_three) = try_join!(req_one, req_two, req_three)?;
 
@@ -440,18 +464,18 @@ async fn valid_and_invalid() -> anyhow::Result<()> {
     let links = resp.into_data().unwrap();
     assert_eq!(links.len(), 3);
     for link in links.iter() {
-        match &link.source_id {
+        match link.source_id() {
             id if id == component_one => {
-                assert_eq!(link.target, component_two);
-                assert_eq!(link.interfaces.len(), 3);
+                assert_eq!(link.target(), component_two);
+                assert_eq!(link.interfaces().len(), 3);
             }
             id if id == component_two => {
-                assert_eq!(link.target, component_three);
-                assert_eq!(link.interfaces.len(), 3);
+                assert_eq!(link.target(), component_three);
+                assert_eq!(link.interfaces().len(), 3);
             }
             id if id == component_three => {
-                assert_eq!(link.target, component_one);
-                assert_eq!(link.interfaces.len(), 3);
+                assert_eq!(link.target(), component_one);
+                assert_eq!(link.interfaces().len(), 3);
             }
             id => bail!("unexpected link source {id}"),
         }

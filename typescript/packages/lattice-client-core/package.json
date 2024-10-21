@@ -13,16 +13,16 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./build/index.d.ts",
-      "import": "./build/lattice-client-core.js",
-      "require": "./build/lattice-client-core.cjs",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/lattice-client-core.js",
+      "require": "./dist/lattice-client-core.cjs",
       "default": "./src/index.ts"
     }
   },
-  "main": "./build/lattice-client-core.cjs",
-  "types": "./build/index.d.ts",
+  "main": "./dist/lattice-client-core.cjs",
+  "types": "./dist/index.d.ts",
   "files": [
-    "build",
+    "dist",
     "README.md"
   ],
   "scripts": {
@@ -30,6 +30,7 @@
     "lint:fix": "yarn lint:eslint:fix",
     "lint:eslint": "eslint --ext .ts,.tsx ./src",
     "lint:eslint:fix": "yarn lint:eslint --fix",
+    "test": "yarn test:types",
     "test:types": "tsc",
     "dev": "vite build --watch --emptyOutDir false --clearScreen false",
     "build": "vite build",
@@ -47,8 +48,8 @@
     "rollup-plugin-sourcemaps": "^0.6.3",
     "tsup": "^8.3.0",
     "type-fest": "^4.26.1",
-    "vite": "^5.4.2",
-    "vite-plugin-dts": "^4.2.3",
+    "vite": "^5.4.9",
+    "vite-plugin-dts": "^4.2.4",
     "vite-tsconfig-paths": "^5.0.1"
   },
   "dependencies": {

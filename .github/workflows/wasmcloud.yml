@@ -2,6 +2,8 @@ name: wasmcloud
 
 on:
   pull_request:
+    paths-ignore:
+      - '*.md'
   merge_group:
   workflow_dispatch:
     inputs:
@@ -152,9 +154,9 @@ jobs:
               docker run --rm wasmcloud:$(nix eval --raw .#wasmcloud-x86_64-unknown-linux-musl-oci.imageTag) wasmcloud --version
 
     name: wasmcloud-${{ matrix.config.target }}
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - uses: ./.github/actions/install-nix
         # need to run condition inside job steps so that job will pass if all steps are skipped
         # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#onpull_requestpull_request_targetbranchesbranches-ignore
@@ -165,20 +167,21 @@ jobs:
           package: wasmcloud-${{ matrix.config.target }}
       - run: ${{ matrix.config.test-bin }}
       - uses: ./.github/actions/build-nix
-        if: ${{ !endsWith(matrix.config.target, 'fhs') }}
+        if: ${{ !endsWith(matrix.config.target, 'fhs') && github.event_name != 'pull_request' }}
         with:
           package: wasmcloud-${{ matrix.config.target }}-oci
       - run: ${{ matrix.config.test-oci }}
-        if: ${{ !endsWith(matrix.config.target, 'fhs') }}
+        if: ${{ !endsWith(matrix.config.target, 'fhs') && github.event_name != 'pull_request' }}
 
   build-windows:
     name: wasmcloud-x86_64-pc-windows-msvc
-    runs-on: windows-latest-8-cores
+    if: startswith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
 
       - run: rustup show
-      - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab
         with:
           shared-key: windows-latest-8-cores-shared-cache
         if: ${{ !startswith(github.ref, format('refs/tags')) }}
@@ -202,7 +205,7 @@ jobs:
       - run: move "target/release/wash.exe" "artifact/bin/wash.exe"
       - run: move "target/release/wasmcloud.exe" "artifact/bin/wasmcloud.exe"
 
-      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
         with:
           name: wasmcloud-x86_64-pc-windows-msvc
           path: artifact
@@ -210,7 +213,7 @@ jobs:
   build-lipo:
     name: wasmcloud-universal-darwin
     needs: build-bin
-    runs-on: macos-12
+    runs-on: macos-13
     steps:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
         with:
@@ -234,13 +237,13 @@ jobs:
       - run: chmod +x ./artifact/bin/wasmcloud
       - run: ./artifact/bin/wasmcloud --version
 
-      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
         with:
           name: wasmcloud-universal-darwin
           path: artifact
 
   test-linux:
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     needs: build-bin
     steps:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
@@ -252,7 +255,7 @@ jobs:
       - run: ./bin/wasmcloud --version
 
   test-windows:
-    runs-on: windows-latest-8-cores
+    runs-on: windows-latest
     needs: build-windows
     steps:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
@@ -271,18 +274,18 @@ jobs:
           - nextest
 
     name: cargo ${{ matrix.check }}
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - uses: ./.github/actions/install-nix
         with:
           cachixAuthToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
       - run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
 
   build-doc:
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - uses: ./.github/actions/install-nix
         with:
           cachixAuthToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -359,7 +362,7 @@ jobs:
       azurecr_password: ${{ secrets.AZURECR_PUSH_PASSWORD }}
 
   deploy-doc:
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     needs: build-doc
     permissions:
       contents: read
@@ -374,16 +377,17 @@ jobs:
         id: deployment
 
   docker:
-    runs-on: ubuntu-22.04-16-cores
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
     env:
       DOCKER_BUILD_RECORD_UPLOAD: false
     needs:
       - build-bin
       - test-linux
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349
       - name: Build wasmCloud
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75
         with:
@@ -399,6 +403,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
   oci:
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
@@ -407,7 +412,7 @@ jobs:
           - bin: wash
             prefix: wash-cli-
 
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
@@ -415,7 +420,7 @@ jobs:
       - build-bin
       - test-linux
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - uses: ./.github/actions/install-nix
         with:
           cachixAuthToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -551,11 +556,11 @@ jobs:
       - oci
       - test-linux
       - test-windows
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
         with:
           path: artifacts
@@ -622,9 +627,9 @@ jobs:
   snapcraft:
     if: startsWith(github.ref, 'refs/tags/wash-cli-v')
     needs: cargo
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
 
       - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79
         id: build
@@ -647,9 +652,9 @@ jobs:
       - cargo
       - build-bin
       - test-linux
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
 
       - uses: ./.github/actions/install-nix
         with:
@@ -748,9 +753,9 @@ jobs:
 
     name: publish ${{ matrix.crate }} to crates.io
     needs: cargo
-    runs-on: ubuntu-22.04-16-cores
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
 
       - name: Extract tag context
         id: ctx
@@ -781,7 +786,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
+      - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
         with:
           fetch-depth: 0
           fetch-tags: true

@@ -1,19 +1,20 @@
 //! Parse wasmcloud.toml files which specify key information for building and signing
 //! WebAssembly modules and native capability provider binaries
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-    fs,
-    path::PathBuf,
-};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Display;
+use std::fs;
+use std::path::PathBuf;
+use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context, Result};
 use cargo_toml::{Manifest, Product};
 use config::Config;
-use semver::Version;
-use serde::Deserialize;
+use semver::{Version, VersionReq};
+use serde::{Deserialize, Deserializer};
+use wadm_types::{Component, Properties, SecretSourceProperty};
 use wasmcloud_control_interface::RegistryCredential;
+use wasmcloud_core::{parse_wit_package_name, WitFunction, WitInterface, WitNamespace, WitPackage};
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -42,30 +43,13 @@ impl TypeConfig {
     }
 }
 
-/// Project configuration, normally specified in the root keys of a wasmcloud.toml file
-#[derive(Deserialize, Debug, Clone)]
-pub struct ProjectConfig {
-    /// The language of the project, e.g. rust, tinygo. Contains specific configuration for that language.
-    pub language: LanguageConfig,
-    /// The type of project, e.g. component, provider, interface. Contains the specific configuration for that type.
-    /// This is renamed to "type" but is named project_type here to avoid clashing with the type keyword in Rust.
-    #[serde(rename = "type")]
-    pub project_type: TypeConfig,
-    /// Configuration common among all project types & languages.
-    pub common: CommonConfig,
-}
-
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct ComponentConfig {
-    /// The list of provider claims that this component requires. eg. ["wasmcloud:httpserver", "wasmcloud:blobstore"]
-    pub claims: Vec<String>,
-    /// Whether to push to the registry insecurely. Defaults to false.
-    pub push_insecure: bool,
     /// The directory to store the private signing keys in.
+    #[serde(default = "default_key_directory")]
     pub key_directory: PathBuf,
-    /// The call alias of the component.
-    pub call_alias: Option<String>,
     /// The target wasm target to build for. Defaults to "wasm32-unknown-unknown" (a WASM core module).
+    #[serde(default, deserialize_with = "wasm_target")]
     pub wasm_target: WasmTarget,
     /// Path to a wasm adapter that can be used for wasip2
     pub wasip1_adapter_path: Option<PathBuf>,
@@ -83,6 +67,15 @@ pub struct ComponentConfig {
     pub destination: Option<PathBuf>,
 }
 
+/// Custom deserializer to parse the wasm target string into a [`WasmTarget`] enum
+fn wasm_target<'de, D>(target: D) -> Result<WasmTarget, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let target = String::deserialize(target)?;
+    Ok(target.as_str().into())
+}
+
 impl RustConfig {
     #[must_use]
     pub fn build_target(&self, wasm_target: &WasmTarget) -> &'static str {
@@ -93,125 +86,40 @@ impl RustConfig {
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq)]
-struct RawComponentConfig {
-    /// The list of provider claims that this component requires. eg. ["wasmcloud:httpserver", "wasmcloud:blobstore"]
-    pub claims: Option<Vec<String>>,
-    /// Whether to push to the registry insecurely. Defaults to false.
-    pub push_insecure: Option<bool>,
-    /// The directory to store the private signing keys in. Defaults to "./keys".
-    pub key_directory: Option<PathBuf>,
-    /// The target wasm target to build for. Defaults to "wasm32-unknown-unknown".
-    pub wasm_target: Option<String>,
-    /// Path to a wasm adapter that can be used for wasip2
-    pub wasip1_adapter_path: Option<PathBuf>,
-    /// The call alias of the component. Defaults to no alias.
-    pub call_alias: Option<String>,
-    /// The WIT world that is implemented by the component
-    pub wit_world: Option<String>,
-    /// Tags that should be applied during the component signing process
-    pub tags: Option<HashSet<String>>,
-    /// File path `wash` can use to find the built artifact. Defaults to `./build/[name].wasm`
-    pub build_artifact: Option<PathBuf>,
-    /// Optional build override command to run instead of attempting to use the native language
-    /// toolchain to build. Keep in mind that `wash` expects for the built artifact to be located
-    /// under the `build` directory of the project root unless overridden by `build_artifact`.
-    pub build_command: Option<String>,
-    /// File path the built and signed component should be written to. Defaults to `./build/[name]_s.wasm`
-    pub destination: Option<PathBuf>,
-}
-
-impl TryFrom<RawComponentConfig> for ComponentConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(raw_config: RawComponentConfig) -> Result<Self> {
-        let key_directory = if let Some(key_directory) = raw_config.key_directory {
-            key_directory
-        } else {
-            let home_dir = home::home_dir()
-                .ok_or_else(|| anyhow::anyhow!("Unable to determine the user's home directory"))?;
-            home_dir.join(".wash/keys")
-        };
-        Ok(Self {
-            claims: raw_config.claims.unwrap_or_default(),
-            push_insecure: raw_config.push_insecure.unwrap_or(false),
-            key_directory,
-            wasm_target: raw_config
-                .wasm_target
-                .map(WasmTarget::from)
-                .unwrap_or_default(),
-            wasip1_adapter_path: raw_config.wasip1_adapter_path,
-            call_alias: raw_config.call_alias,
-            wit_world: raw_config.wit_world,
-            tags: raw_config.tags,
-            build_command: raw_config.build_command,
-            build_artifact: raw_config.build_artifact,
-            destination: raw_config.destination,
-        })
-    }
-}
-
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct ProviderConfig {
     /// The vendor name of the provider.
+    #[serde(default = "default_vendor")]
     pub vendor: String,
     /// Optional WIT world for the provider, e.g. `wasmcloud:messaging`
     pub wit_world: Option<String>,
     /// The target operating system of the provider archive. Defaults to the current OS.
+    #[serde(default = "default_os")]
     pub os: String,
     /// The target architecture of the provider archive. Defaults to the current architecture.
+    #[serde(default = "default_arch")]
     pub arch: String,
     /// The Rust target triple to build for. Defaults to the default rust toolchain.
     pub rust_target: Option<String>,
     /// Optional override for the provider binary name, required if we cannot infer this from Cargo.toml
     pub bin_name: Option<String>,
     /// The directory to store the private signing keys in.
+    #[serde(default = "default_key_directory")]
     pub key_directory: PathBuf,
 }
 
-#[derive(Deserialize, Debug, PartialEq)]
-struct RawProviderConfig {
-    /// The vendor name of the provider.
-    pub vendor: Option<String>,
-    /// Optional WIT world for the provider, e.g. `wasmcloud:messaging`
-    pub wit_world: Option<String>,
-    /// The target operating system of the provider archive. Defaults to the current OS.
-    pub os: Option<String>,
-    /// The target architecture of the provider archive. Defaults to the current architecture.
-    pub arch: Option<String>,
-    /// The Rust target triple to build for. Defaults to the default rust toolchain.
-    pub rust_target: Option<String>,
-    /// Optional override for the provider binary name, required if we cannot infer this from Cargo.toml
-    pub bin_name: Option<String>,
-    /// The directory to store the private signing keys in.
-    pub key_directory: Option<PathBuf>,
+fn default_vendor() -> String {
+    "NoVendor".to_string()
 }
-
-impl TryFrom<RawProviderConfig> for ProviderConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(raw_config: RawProviderConfig) -> Result<Self> {
-        let key_directory = if let Some(key_directory) = raw_config.key_directory {
-            key_directory
-        } else {
-            let home_dir = home::home_dir()
-                .ok_or_else(|| anyhow::anyhow!("Unable to determine the user's home directory"))?;
-            home_dir.join(".wash/keys")
-        };
-        Ok(Self {
-            vendor: raw_config.vendor.unwrap_or_else(|| "NoVendor".to_string()),
-            os: raw_config
-                .os
-                .unwrap_or_else(|| std::env::consts::OS.to_string()),
-            arch: raw_config
-                .arch
-                .unwrap_or_else(|| std::env::consts::ARCH.to_string()),
-            rust_target: raw_config.rust_target,
-            bin_name: raw_config.bin_name,
-            wit_world: raw_config.wit_world,
-            key_directory,
-        })
-    }
+fn default_os() -> String {
+    std::env::consts::OS.to_string()
+}
+fn default_arch() -> String {
+    std::env::consts::ARCH.to_string()
+}
+fn default_key_directory() -> PathBuf {
+    let home_dir = etcetera::home_dir().unwrap();
+    home_dir.join(".wash/keys")
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Default)]
@@ -221,52 +129,19 @@ pub struct RustConfig {
     /// Path to cargo/rust's `target` directory. Optional, defaults to the cargo target directory for the workspace or project.
     pub target_path: Option<PathBuf>,
     // Whether to build in debug mode. Defaults to false.
+    #[serde(default)]
     pub debug: bool,
 }
 
-#[derive(Deserialize, Debug, PartialEq, Default, Clone)]
-struct RawRustConfig {
-    /// The path to the cargo binary. Optional, will default to search the user's `PATH` for `cargo` if not specified.
-    pub cargo_path: Option<PathBuf>,
-    /// Path to cargo/rust's `target` directory. Optional, defaults to `./target`.
-    pub target_path: Option<PathBuf>,
-    /// Whether to build in debug mode. Defaults to false.
-    pub debug: Option<bool>,
-}
-
-impl TryFrom<RawRustConfig> for RustConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(raw_config: RawRustConfig) -> Result<Self> {
-        Ok(Self {
-            cargo_path: raw_config.cargo_path,
-            target_path: raw_config.target_path,
-            debug: raw_config.debug.unwrap_or_default(),
-        })
-    }
-}
-
-#[derive(Deserialize, Debug, PartialEq, Default, Clone)]
-struct RawRegistryConfig {
-    url: Option<String>,
-    credentials: Option<PathBuf>,
-}
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct RegistryConfig {
     pub url: Option<String>,
     pub credentials: Option<PathBuf>,
+    /// Whether or not to push to the registry insecurely with http
+    #[serde(default)]
+    pub push_insecure: bool,
 }
 
-impl TryFrom<RawRegistryConfig> for RegistryConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(raw_config: RawRegistryConfig) -> Result<Self> {
-        Ok(Self {
-            url: raw_config.url,
-            credentials: raw_config.credentials,
-        })
-    }
-}
 /// Configuration common amoung all project types & languages.
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct CommonConfig {
@@ -276,8 +151,14 @@ pub struct CommonConfig {
     pub version: Version,
     /// Monotonically increasing revision number
     pub revision: i32,
-    /// Path to the project directory to determine where built and signed artifacts should be
-    pub path: PathBuf,
+    /// Path to the project root to determine where build commands should be run.
+    pub project_dir: PathBuf,
+    /// Path to the directory where built artifacts should be written. Defaults to a `build` directory
+    /// in the project root.
+    pub build_dir: PathBuf,
+    /// Path to the directory where the WIT world and dependencies can be found. Defaults to a `wit`
+    /// directory in the project root.
+    pub wit_dir: PathBuf,
     /// Expected name of the wasm module binary that will be generated
     /// (if not present, name is expected to be used as a fallback)
     pub wasm_bin_name: Option<String>,
@@ -343,61 +224,49 @@ impl Display for WasmTarget {
     }
 }
 
-#[derive(Deserialize, Debug)]
-struct RawProjectConfig {
-    /// The language of the project, e.g. rust, tinygo. This is used to determine which config to parse.
-    pub language: String,
-
-    /// The type of project. This is a string that is used to determine which type of config to parse.
-    /// The toml file name is just "type" but is named project_type here to avoid clashing with the type keyword in Rust.
-    #[serde(rename = "type")]
-    pub project_type: String,
-
-    /// Name of the project.
-    pub name: Option<String>,
-
-    /// Semantic version of the project.
-    pub version: Option<Version>,
-
-    /// Monotonically increasing revision number.
-    #[serde(default)]
-    pub revision: i32,
-
-    #[serde(alias = "component")]
-    pub component: Option<RawComponentConfig>,
-    pub provider: Option<RawProviderConfig>,
-
-    pub rust: Option<RawRustConfig>,
-    pub tinygo: Option<RawTinyGoConfig>,
-    pub go: Option<RawGoConfig>,
-    pub registry: Option<RawRegistryConfig>,
-}
-
+/// Configuration related to Golang configuration
 #[derive(Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct GoConfig {
     /// The path to the go binary. Optional, will default to `go` if not specified.
     pub go_path: Option<PathBuf>,
     /// Whether to disable the `go generate` step in the build process. Defaults to false.
-    pub disable_go_generate: bool,
-}
-
-#[derive(Deserialize, Debug, PartialEq, Default)]
-struct RawGoConfig {
-    /// The path to the go binary. Optional, will default to `go` if not specified.
-    pub go_path: Option<PathBuf>,
-    /// Whether to disable the `go generate` step in the build process. Defaults to false.
     #[serde(default)]
     pub disable_go_generate: bool,
 }
 
-impl TryFrom<RawGoConfig> for GoConfig {
-    type Error = anyhow::Error;
+#[derive(Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum TinyGoScheduler {
+    None,
+    Tasks,
+    Asyncify,
+}
 
-    fn try_from(raw: RawGoConfig) -> Result<Self> {
-        Ok(Self {
-            go_path: raw.go_path,
-            disable_go_generate: raw.disable_go_generate,
-        })
+impl TinyGoScheduler {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Tasks => "tasks",
+            Self::Asyncify => "asyncify",
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum TinyGoGarbageCollector {
+    None,
+    Conservative,
+    Leaking,
+}
+
+impl TinyGoGarbageCollector {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Conservative => "conservative",
+            Self::Leaking => "leaking",
+        }
     }
 }
 
@@ -406,7 +275,16 @@ pub struct TinyGoConfig {
     /// The path to the tinygo binary. Optional, will default to `tinygo` if not specified.
     pub tinygo_path: Option<PathBuf>,
     /// Whether to disable the `go generate` step in the build process. Defaults to false.
+    #[serde(default)]
     pub disable_go_generate: bool,
+    /// The scheduler to use for the TinyGo build.
+    ///
+    /// Override the default scheduler (asyncify). Valid values are: none, tasks, asyncify.
+    pub scheduler: Option<TinyGoScheduler>,
+    /// The garbage collector to use for the TinyGo build.
+    ///
+    /// Override the default garbage collector (conservative). Valid values are: none, conservative, leaking.
+    pub garbage_collector: Option<TinyGoGarbageCollector>,
 }
 
 impl TinyGoConfig {
@@ -420,27 +298,383 @@ impl TinyGoConfig {
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq, Default)]
-struct RawTinyGoConfig {
-    /// The path to the tinygo binary. Optional, will default to `tinygo` if not specified.
-    pub tinygo_path: Option<PathBuf>,
-    /// Whether to disable the `go generate` step in the build process. Defaults to false.
-    #[serde(default)]
-    pub disable_go_generate: bool,
+/// Specification for how to wire up configuration
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum DevConfigSpec {
+    /// Existing config with the given name
+    Named { name: String },
+    /// Explicitly specified configuration with all values presented
+    Values { values: BTreeMap<String, String> },
 }
 
-impl TryFrom<RawTinyGoConfig> for TinyGoConfig {
-    type Error = anyhow::Error;
+/// Specification for how to wire up secrets
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum DevSecretSpec {
+    /// Existing secret with a name and source properties
+    Existing {
+        name: String,
+        source: SecretSourceProperty,
+    },
+    /// Explicitly specified secret values with all values presented
+    ///
+    /// NOTE: Secret names are required at all times, since secrets
+    /// *must* be named when interacting with a secret store
+    Values {
+        name: String,
+        values: BTreeMap<String, String>,
+    },
+}
 
-    fn try_from(raw: RawTinyGoConfig) -> Result<Self> {
-        Ok(Self {
-            tinygo_path: raw.tinygo_path,
-            disable_go_generate: raw.disable_go_generate,
-        })
+/// Target that specifies a single component in a given manifest path
+#[derive(Default, Debug, PartialEq, Eq, Clone, Deserialize)]
+pub struct DevManifestComponentTarget {
+    /// Name of the component that should be targeted
+    pub component_name: Option<String>,
+
+    /// The ID of the component that should be targeted
+    pub component_id: Option<String>,
+
+    /// The image reference of the component that should be targeted
+    pub component_ref: Option<String>,
+
+    /// The manifest in which the target exists
+    pub path: PathBuf,
+}
+
+impl DevManifestComponentTarget {
+    pub fn matches(&self, component: &Component) -> bool {
+        let (component_id, component_ref) = match &component.properties {
+            Properties::Component { ref properties } => (&properties.id, &properties.image),
+            Properties::Capability { ref properties } => (&properties.id, &properties.image),
+        };
+
+        if self
+            .component_name
+            .as_ref()
+            .is_some_and(|v| v == &component.name)
+        {
+            return true;
+        }
+
+        if self
+            .component_id
+            .as_ref()
+            .is_some_and(|a| component_id.as_ref().is_some_and(|b| a == b))
+        {
+            return true;
+        }
+
+        if self
+            .component_ref
+            .as_ref()
+            .is_some_and(|v| v == component_ref)
+        {
+            return true;
+        }
+
+        false
     }
 }
 
-/// Gets the wasmCloud project (component, provider, or interface) config.
+/// Interface-based overrides used for a single component
+#[derive(Default, Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct InterfaceComponentOverride {
+    /// Specification of the interface
+    ///
+    /// ex. `wasi:keyvalue@0.2.0`, `wasi:http/incoming-handler@0.2.0`
+    #[serde(alias = "interface")]
+    pub interface_spec: String,
+
+    /// Configuration that should be provided to the overriden component
+    pub config: Option<OneOrMore<DevConfigSpec>>,
+
+    /// Configuration that should be provided to the overriden component
+    pub secrets: Option<OneOrMore<DevSecretSpec>>,
+
+    /// Reference to the component
+    #[serde(alias = "uri")]
+    pub image_ref: Option<String>,
+
+    /// Link name that should be used to reference the component
+    ///
+    /// This is only required when there are *more than one* overrides that conflict (i.e. there is no "default")
+    pub link_name: Option<String>,
+}
+
+/// String that represents a specification of a WIT interface (normally used when specifying [`InterfaceComponentOverride`]s)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WitInterfaceSpec {
+    /// WIT namespace
+    pub namespace: WitNamespace,
+    /// WIT package
+    pub package: WitPackage,
+    /// WIT interface
+    pub interface: Option<WitInterface>,
+    /// WIT interface
+    pub function: Option<WitFunction>,
+    /// Version of WIT interface
+    pub version: Option<Version>,
+}
+
+impl WitInterfaceSpec {
+    /// Check whether this wit interface specification "contains" another one
+    ///
+    /// Containing another WIT interface spec means the current interface (if loosely specified)
+    /// is *more* general than the `other` one.
+    ///
+    /// This means that if the `other` spec is more general, this one will count as overlapping with it.
+    ///
+    /// ```
+    /// assert!(WitInterfaceSpec::from_str("wasi:http").includes(WitInterfaceSpec::from_str("wasi:http/incoming-handler")));
+    /// assert!(WitInterfaceSpec::from_str("wasi:http/incoming-handler").includes(WitInterfaceSpec::from_str("wasi:http/incoming-handler.handle")));
+    /// ```
+    pub fn is_disjoint(&self, other: &Self) -> bool {
+        if self.namespace != other.namespace {
+            return true;
+        }
+        if self.package != other.package {
+            return true;
+        }
+        // If interfaces don't match, this interface can't contain the other one
+        match (self.interface.as_ref(), other.interface.as_ref()) {
+            // If they both have no interface specified, then we do overlap
+            (None, None) |
+            // If the other has no interface, but this one does, this *does* overlap
+            (Some(_), None) |
+            // If this spec has no interface, but the other does, then we do overlap
+            (None, Some(_)) => {
+                return false;
+            }
+            // If both specify different interfaces, we don't overlap
+            (Some(iface), Some(other_iface)) if iface != other_iface => {
+                return true;
+            }
+            // The only option left is when the interfaces are the same
+            (Some(_), Some(_)) => {}
+        }
+
+        // At this point, we know that the interfaces must match
+        match (self.function.as_ref(), other.function.as_ref()) {
+            // If neither have functions, they cannot be disjoint
+            (None, None) |
+            // If only self has a function, then they are not disjoint
+            // (other contains self)
+            (Some(_), None) |
+            // If only the other has a function, then they are not disjoint
+            // (self contains other)
+            (None, Some(_)) => {
+                return false;
+            }
+            // If the functions differ, these are disjoint
+            (Some(f), Some(other_f)) if f != other_f => {
+                return true;
+            }
+            // The only option left is when the functions are the same
+            (Some(_), Some(_)) => {}
+        }
+
+        // Compare the versions
+        match (self.version.as_ref(), other.version.as_ref())  {
+            // If the neither have versions, they cannot be disjoint
+            (None, None) |
+            // If only self has a version, they cannot be disjoint
+            // (self contains other)
+            (Some(_), None) |
+            // If only the other has a version, they cannot be disjoint
+            // (other contains self)
+            (None, Some(_)) => {
+                false
+            }
+            // If the *either* version matches the other in semantic version terms, they cannot be disjoint
+            //
+            // Realistically this means that 0.2.0 and 0.2.1 are *not* disjoint, and while they could be,
+            // we assume that semantic versioning semantics should ensure that 0.2.0 and 0.2.1 are backwards compatible
+            // (though for <1.x versions, there is no such "real" guarantee)
+            //
+            (Some(v), Some(other_v)) if VersionReq::parse(&format!("^{v}")).is_ok_and(|req| req.matches(other_v)) => { false }
+            (Some(v), Some(other_v)) if VersionReq::parse(&format!("^{other_v}")).is_ok_and(|req| req.matches(v)) => {
+                false
+            }
+            // The only option left is that the versions are the same and their versions are incompatible/different
+            _ => true
+        }
+    }
+}
+
+impl std::str::FromStr for WitInterfaceSpec {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match parse_wit_package_name(s) {
+            Ok((namespace, packages, interfaces, function, version))
+                if packages.len() == 1
+                    && (interfaces.is_none()
+                        || interfaces.as_ref().is_some_and(|v| v.len() == 1)) =>
+            {
+                Ok(Self {
+                    namespace,
+                    package: packages
+                        .into_iter()
+                        .next()
+                        .context("unexpectedly missing package")?,
+                    interface: match interfaces {
+                        Some(v) => Some(
+                            v.into_iter()
+                                .next()
+                                .context("unexpectedly missing interface")?,
+                        ),
+                        None => None,
+                    },
+                    function,
+                    version,
+                })
+            }
+            Ok((_, _, _, Some(_), _)) => {
+                bail!("function-level interface overrides are not yet supported")
+            }
+            Ok(_) => bail!("nested interfaces not yet supported"),
+            Err(e) => bail!("failed to parse WIT interface spec (\"{s}\"): {e}"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for WitInterfaceSpec {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Multi {
+            Stringified(String),
+            Explicit {
+                namespace: String,
+                package: String,
+                interface: Option<String>,
+                function: Option<String>,
+                version: Option<Version>,
+            },
+        }
+
+        match Multi::deserialize(deserializer)? {
+            Multi::Stringified(s) => Self::from_str(&s).map_err(|e| {
+                serde::de::Error::custom(format!(
+                    "failed to parse WIT interface specification: {e}"
+                ))
+            }),
+            Multi::Explicit {
+                namespace,
+                package,
+                interface,
+                function,
+                version,
+            } => Ok(Self {
+                namespace,
+                package,
+                interface,
+                function,
+                version,
+            }),
+        }
+    }
+}
+
+/// Facilitates *one* of a given `T` or more (primarily for serde use)
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum OneOrMore<T> {
+    /// Only one of the given type
+    One(T),
+    /// More than one T
+    More(Vec<T>),
+}
+
+impl<T> OneOrMore<T> {
+    /// Convert this `OneOrMore<T>` into a `Vec<T>`
+    #[allow(unused)]
+    fn into_vec(self) -> Vec<T> {
+        match self {
+            OneOrMore::One(t) => vec![t],
+            OneOrMore::More(ts) => ts,
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        OneOrMoreIterator {
+            inner: self,
+            idx: 0,
+        }
+    }
+}
+
+/// Iterator for [`OneOrMore`]
+pub struct OneOrMoreIterator<'a, T> {
+    inner: &'a OneOrMore<T>,
+    idx: usize,
+}
+
+impl<'a, T> Iterator for OneOrMoreIterator<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.idx, self.inner) {
+            (0, OneOrMore::One(inner)) => {
+                if let Some(v) = self.idx.checked_add(1) {
+                    self.idx = v
+                }
+                Some(inner)
+            }
+            (_, OneOrMore::One(_)) => None,
+            (idx, OneOrMore::More(vs)) => {
+                if let Some(v) = self.idx.checked_add(1) {
+                    self.idx = v
+                }
+                vs.get(idx)
+            }
+        }
+    }
+}
+
+/// Configuration for imports that should be overriden
+#[derive(Default, Debug, PartialEq, Eq, Clone, Deserialize)]
+pub struct InterfaceOverrides {
+    /// Imports that should be overriden
+    #[serde(default)]
+    pub imports: Vec<InterfaceComponentOverride>,
+
+    /// Exports that should be overriden
+    #[serde(default)]
+    pub exports: Vec<InterfaceComponentOverride>,
+}
+
+/// Configuration for development environments and/or DX related plugins
+#[derive(Default, Debug, PartialEq, Eq, Clone, Deserialize)]
+pub struct DevConfig {
+    /// Top level override of the WADM application manifest(s) to use for development
+    ///
+    /// If this value is specified, tooling should strive to use the provided manifest where possible.
+    /// If unspecified, it is up to tools to generate a manifest from available information.
+    #[serde(default)]
+    pub manifests: Vec<DevManifestComponentTarget>,
+
+    /// Configuration values to be passed ot the
+    #[serde(default, alias = "configs")]
+    pub config: Vec<DevConfigSpec>,
+
+    /// Configuration values to be passed ot the
+    #[serde(default)]
+    pub secrets: Vec<DevSecretSpec>,
+
+    /// Interface-driven overrides
+    ///
+    /// Normally keyed by strings that represent an interface specification (e.g. `wasi:keyvalue/store@0.2.0-draft`)
+    #[serde(default)]
+    pub overrides: InterfaceOverrides,
+}
+
+/// Gets the wasmCloud project (component or provider) config.
 ///
 /// The config can come from multiple sources: a specific toml file path, a folder with a `wasmcloud.toml` file inside it, or by default it looks for a `wasmcloud.toml` file in the current directory.
 ///
@@ -450,15 +684,17 @@ impl TryFrom<RawTinyGoConfig> for TinyGoConfig {
 /// # Arguments
 /// * `opt_path` - The path to the config file. If None, it will look for a wasmcloud.toml file in the current directory.
 /// * `use_env` - Whether to use the environment variables or not. If false, it will not attempt to use environment variables. Defaults to true.
-pub fn get_config(opt_path: Option<PathBuf>, use_env: Option<bool>) -> Result<ProjectConfig> {
-    let mut path = opt_path.unwrap_or_else(|| PathBuf::from("."));
+pub fn load_config(opt_path: Option<PathBuf>, use_env: Option<bool>) -> Result<ProjectConfig> {
+    let mut path = opt_path
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
 
     if !path.exists() {
         bail!("path {} does not exist", path.display());
     }
 
     path = fs::canonicalize(path)?;
-    let (project_path, wasmcloud_path) = if path.is_dir() {
+    let (wasmcloud_toml_dir, wasmcloud_toml_path) = if path.is_dir() {
         let wasmcloud_path = path.join("wasmcloud.toml");
         if !wasmcloud_path.is_file() {
             bail!("failed to find wasmcloud.toml in [{}]", path.display());
@@ -478,7 +714,7 @@ pub fn get_config(opt_path: Option<PathBuf>, use_env: Option<bool>) -> Result<Pr
         );
     };
 
-    let mut config = Config::builder().add_source(config::File::from(wasmcloud_path.clone()));
+    let mut config = Config::builder().add_source(config::File::from(wasmcloud_toml_path.clone()));
 
     if use_env.unwrap_or(true) {
         config = config.add_source(config::Environment::with_prefix("WASMCLOUD"));
@@ -488,30 +724,113 @@ pub fn get_config(opt_path: Option<PathBuf>, use_env: Option<bool>) -> Result<Pr
         .build()
         .map_err(|e| {
             if e.to_string().contains("is not of a registered file format") {
-                return anyhow!("invalid config file: {}", wasmcloud_path.display());
+                return anyhow!("invalid config file: {}", wasmcloud_toml_path.display());
             }
 
             anyhow!("{}", e)
         })?
         .try_deserialize::<serde_json::Value>()?;
 
-    let raw_project_config: RawProjectConfig = serde_json::from_value(json_value)?;
+    let toml_project_config: WasmcloudDotToml = serde_json::from_value(json_value)?;
 
-    raw_project_config
-        .convert(project_path)
-        .map_err(|e: anyhow::Error| anyhow!("{} in {}", e, wasmcloud_path.display()))
+    toml_project_config
+        .convert(wasmcloud_toml_dir)
+        .map_err(|e: anyhow::Error| anyhow!("{} in {}", e, wasmcloud_toml_path.display()))
 }
 
-impl RawProjectConfig {
+/// The wasmcloud.toml specification format as de-serialization friendly project configuration data
+///
+/// This structure is normally directly de-serialized from `wasmcloud.toml`,
+/// and is used to build a more structured [`ProjectConfig`] object.
+///
+/// Below is an example of each option in the wasmcloud.toml file. A real example
+/// only needs to include the fields that are relevant to the project.
+///
+/// ```rust
+/// use wash_lib::parser::WasmcloudDotToml;
+///
+/// let component_toml = r#"
+/// language = "rust"
+/// type = "component"
+/// name = "testcomponent"
+/// version = "0.1.0"
+/// "#;
+/// let config: WasmcloudDotToml = toml::from_str(component_toml).expect("should deserialize");
+/// eprintln!("{config:?}");
+/// ```
+#[derive(Deserialize, Debug)]
+pub struct WasmcloudDotToml {
+    /// The language of the project, e.g. rust, tinygo. This is used to determine which config to parse.
+    pub language: String,
+
+    /// The type of project. This is a string that is used to determine which type of config to parse.
+    /// The toml file name is just "type" but is named project_type here to avoid clashing with the type keyword in Rust.
+    #[serde(rename = "type")]
+    pub project_type: String,
+
+    /// Name of the project. Optional if building a Rust project, as it can be inferred from Cargo.toml.
+    pub name: Option<String>,
+
+    /// Semantic version of the project. Optional if building a Rust project, as it can be inferred from Cargo.toml.
+    pub version: Option<Version>,
+
+    /// Monotonically increasing revision number.
+    #[serde(default)]
+    pub revision: i32,
+
+    /// Path to the directory where the project is located. Defaults to the current directory.
+    /// This path is where build commands will be run.
+    pub path: Option<PathBuf>,
+
+    /// Path to the directory where the WIT world and dependencies can be found. Defaults to a `wit`
+    /// directory in the project root.
+    pub wit: Option<PathBuf>,
+
+    /// Path to the directory where the built artifacts should be written. Defaults to a `build`
+    /// directory in the project root.
+    pub build: Option<PathBuf>,
+
+    /// Configuration relevant to components
+    #[serde(default)]
+    pub component: ComponentConfig,
+
+    /// Configuration relevant to providers
+    #[serde(default)]
+    pub provider: ProviderConfig,
+
+    /// Rust configuration and options
+    #[serde(default)]
+    pub rust: RustConfig,
+
+    /// TinyGo related configuration and options
+    #[serde(default)]
+    pub tinygo: TinyGoConfig,
+
+    /// Golang related configuration and options
+    #[serde(default)]
+    pub go: GoConfig,
+
+    /// Configuration for image registry usage
+    #[serde(default)]
+    pub registry: RegistryConfig,
+
+    /// Configuration for development environments and/or DX related plugins
+    #[serde(default)]
+    pub dev: DevConfig,
+}
+
+impl WasmcloudDotToml {
     // Given a path to a valid cargo project, build an common_config enriched with Rust-specific information
     fn build_common_config_from_cargo_project(
-        project_path: PathBuf,
+        project_dir: PathBuf,
+        build_dir: PathBuf,
+        wit_dir: PathBuf,
         name: Option<String>,
         version: Option<Version>,
         revision: i32,
         registry: RegistryConfig,
     ) -> Result<CommonConfig> {
-        let cargo_toml_path = project_path.join("Cargo.toml");
+        let cargo_toml_path = project_dir.join("Cargo.toml");
         if !cargo_toml_path.is_file() {
             bail!(
                 "missing/invalid Cargo.toml path [{}]",
@@ -523,7 +842,7 @@ impl RawProjectConfig {
         let mut cargo_toml = Manifest::from_path(cargo_toml_path)?;
 
         // Populate Manifest with lib/bin information
-        cargo_toml.complete_from_path(&project_path)?;
+        cargo_toml.complete_from_path(&project_dir)?;
 
         let cargo_pkg = cargo_toml
             .package
@@ -549,73 +868,75 @@ impl RawProjectConfig {
             name,
             version,
             revision,
-            path: project_path,
+            wit_dir,
+            build_dir,
+            project_dir,
             wasm_bin_name,
             registry,
         })
     }
 
-    pub fn convert(self, project_path: PathBuf) -> Result<ProjectConfig> {
+    pub fn convert(self, wasmcloud_toml_dir: PathBuf) -> Result<ProjectConfig> {
         let project_type_config = match self.project_type.trim().to_lowercase().as_str() {
-            "component" => {
-                let component_config = self.component.context("missing component config")?;
-                TypeConfig::Component(component_config.try_into()?)
-            }
-
-            "provider" => TypeConfig::Provider(
-                self.provider
-                    .context("missing provider config")?
-                    .try_into()?,
-            ),
-
-            _ => {
-                bail!("unknown project type: {}", self.project_type);
-            }
+            "component" => TypeConfig::Component(self.component),
+            "provider" => TypeConfig::Provider(self.provider),
+            project_type => bail!("unknown project type: {project_type}"),
         };
 
         let language_config = match self.language.trim().to_lowercase().as_str() {
-            "rust" => match self.rust {
-                Some(rust_config) => LanguageConfig::Rust(rust_config.try_into()?),
-                None => LanguageConfig::Rust(RustConfig::default()),
-            },
-            "go" => match self.go {
-                Some(go_config) => LanguageConfig::Go(go_config.try_into()?),
-                None => LanguageConfig::Go(GoConfig::default()),
-            },
-            "tinygo" => match self.tinygo {
-                Some(tinygo_config) => LanguageConfig::TinyGo(tinygo_config.try_into()?),
-                None => LanguageConfig::TinyGo(TinyGoConfig::default()),
-            },
+            "rust" => LanguageConfig::Rust(self.rust),
+            "go" => LanguageConfig::Go(self.go),
+            "tinygo" => LanguageConfig::TinyGo(self.tinygo),
             other => LanguageConfig::Other(other.to_string()),
         };
 
-        let registry_config = self
-            .registry
-            .map(RegistryConfig::try_from)
-            .transpose()?
-            .unwrap_or_default();
+        // Use the provided `path` in the wasmcloud.toml file, or default to the current directory
+        let project_path = self
+            .path
+            .map(|p| {
+                // If the path in the wasmcloud.toml is absolute, use that directly.
+                // Otherwise, join it with the project_path so that it's relative to the wasmcloud.toml
+                if p.is_absolute() {
+                    p
+                } else {
+                    wasmcloud_toml_dir.join(p)
+                }
+            })
+            .unwrap_or(wasmcloud_toml_dir);
+        let project_path = project_path.canonicalize().with_context(|| {
+            format!(
+                "failed to canonicalize project path: [{}]",
+                project_path.display()
+            )
+        })?;
+        let build_dir = self.build.unwrap_or_else(|| project_path.join("build"));
+        let wit_dir = self.wit.unwrap_or_else(|| project_path.join("wit"));
 
-        let common_config_result: Result<CommonConfig> = match language_config {
+        let common_config = match language_config {
             LanguageConfig::Rust(_) => {
                 match Self::build_common_config_from_cargo_project(
                     project_path.clone(),
+                    build_dir.clone(),
+                    wit_dir.clone(),
                     self.name.clone(),
                     self.version.clone(),
                     self.revision,
-                    registry_config.clone(),
+                    self.registry.clone(),
                 ) {
                     // Successfully built with cargo information
-                    Ok(cfg) => Ok(cfg),
+                    Ok(cfg) => cfg,
 
                     // Fallback to non-specific language usage if we at least have a name & version
-                    Err(_) if self.name.is_some() && self.version.is_some() => Ok(CommonConfig {
+                    Err(_) if self.name.is_some() && self.version.is_some() => CommonConfig {
                         name: self.name.unwrap(),
                         version: self.version.unwrap(),
                         revision: self.revision,
-                        path: project_path,
                         wasm_bin_name: None,
-                        registry: registry_config,
-                    }),
+                        project_dir: project_path,
+                        wit_dir,
+                        build_dir,
+                        registry: self.registry,
+                    },
 
                     Err(err) => {
                         bail!("No Cargo.toml file found in the current directory, and name/version unspecified: {err}")
@@ -624,7 +945,7 @@ impl RawProjectConfig {
             }
 
             LanguageConfig::Go(_) | LanguageConfig::TinyGo(_) | LanguageConfig::Other(_) => {
-                Ok(CommonConfig {
+                CommonConfig {
                     name: self
                         .name
                         .ok_or_else(|| anyhow!("Missing name in wasmcloud.toml"))?,
@@ -632,19 +953,37 @@ impl RawProjectConfig {
                         .version
                         .ok_or_else(|| anyhow!("Missing version in wasmcloud.toml"))?,
                     revision: self.revision,
-                    path: project_path,
+                    project_dir: project_path,
                     wasm_bin_name: None,
-                    registry: registry_config,
-                })
+                    wit_dir,
+                    build_dir,
+                    registry: self.registry,
+                }
             }
         };
 
         Ok(ProjectConfig {
-            language: language_config,
+            dev: self.dev,
             project_type: project_type_config,
-            common: common_config_result?,
+            language: language_config,
+            common: common_config,
         })
     }
+}
+
+/// Project configuration, normally specified in the root keys of a wasmcloud.toml file
+#[derive(Deserialize, Debug, Clone)]
+pub struct ProjectConfig {
+    /// The language of the project, e.g. rust, tinygo. Contains specific configuration for that language.
+    pub language: LanguageConfig,
+    /// The type of project, e.g. component, provider, interface. Contains the specific configuration for that type.
+    /// This is renamed to "type" but is named project_type here to avoid clashing with the type keyword in Rust.
+    #[serde(rename = "type")]
+    pub project_type: TypeConfig,
+    /// Configuration common among all project types & languages.
+    pub common: CommonConfig,
+    /// Configuration for development environments and/or DX related plugins
+    pub dev: DevConfig,
 }
 
 impl ProjectConfig {

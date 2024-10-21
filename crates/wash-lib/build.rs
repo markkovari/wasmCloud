@@ -25,6 +25,15 @@ async fn record_reachability(host: &str) {
 
 #[tokio::main]
 async fn main() {
+    // Determine whether default docker is available
+    println!("cargo:rustc-check-cfg=cfg(docker_available)");
+    if testcontainers::core::client::docker_client_instance()
+        .await
+        .is_ok()
+    {
+        println!("cargo:rustc-cfg=docker_available");
+    }
+
     join!(
         record_reachability("github.com"),
         record_reachability("raw.githubusercontent.com"),

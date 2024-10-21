@@ -20,7 +20,7 @@ use crate::{
     cli::inspect,
     common::boxed_err_to_anyhow,
     config::WashConnectionOptions,
-    parser::{get_config, ComponentConfig, ProjectConfig, ProviderConfig, TypeConfig},
+    parser::{load_config, ComponentConfig, ProjectConfig, ProviderConfig, TypeConfig},
 };
 
 #[derive(Debug, Clone, Subcommand)]
@@ -316,7 +316,7 @@ impl ComponentMetadata {
                     .collect::<Vec<String>>(),
                 None => self.tags,
             },
-            call_alias: self.call_alias.or(component_config.call_alias),
+            call_alias: self.call_alias,
             common: GenerateCommon {
                 directory: self
                     .common
@@ -350,7 +350,7 @@ pub async fn handle_command(
     command: ClaimsCliCommand,
     output_kind: OutputKind,
 ) -> Result<CommandOutput> {
-    let project_config = get_config(None, Some(true)).ok();
+    let project_config = load_config(None, Some(true)).ok();
     match command {
         ClaimsCliCommand::Inspect(inspectcmd) => {
             warn!("claims inspect will be deprecated in future versions. Use inspect instead.");
@@ -697,7 +697,7 @@ pub async fn get_claims(
         .get_claims()
         .await
         .map_err(boxed_err_to_anyhow)
-        .map(|c| c.response.unwrap_or_default())
+        .map(|c| c.into_data().unwrap_or_default())
         .with_context(|| {
             format!("Was able to connect to NATS, but failed to get claims: {client:?}")
         })
@@ -1201,7 +1201,7 @@ mod test {
 
     #[test]
     fn rust_component_metadata_with_project_config_overrides() -> anyhow::Result<()> {
-        let result = get_config(
+        let result = load_config(
             Some(PathBuf::from(
                 "./tests/parser/files/rust_component_claims_metadata.toml",
             )),
@@ -1222,14 +1222,8 @@ mod test {
         assert_eq!(
             project_config.project_type,
             TypeConfig::Component(ComponentConfig {
-                claims: vec![
-                    "wasmcloud:httpserver".to_string(),
-                    "wasmcloud:httpclient".to_string(),
-                    "lexcorp:quantum-simulator".to_string()
-                ],
                 key_directory: PathBuf::from("./keys"),
                 destination: Some(PathBuf::from("./build/testcomponent.wasm".to_string())),
-                call_alias: Some("test-component".to_string()),
                 tags: Some(HashSet::from([
                     "wasmcloud.com/experimental".into(),
                     "test".into(),
@@ -1244,9 +1238,17 @@ mod test {
                 name: "testcomponent".to_string(),
                 version: Version::parse("0.1.0").unwrap(),
                 revision: 666,
-                path: PathBuf::from("./tests/parser/files/")
+                project_dir: PathBuf::from("./tests/parser/files/")
                     .canonicalize()
                     .unwrap(),
+                build_dir: PathBuf::from("./tests/parser/files/")
+                    .canonicalize()
+                    .unwrap()
+                    .join("build"),
+                wit_dir: PathBuf::from("./tests/parser/files/")
+                    .canonicalize()
+                    .unwrap()
+                    .join("wit"),
                 wasm_bin_name: None,
                 registry: RegistryConfig::default(),
             }
@@ -1261,7 +1263,7 @@ mod test {
                 name: Some("testcomponent".to_string()),
                 ver: Some(Version::parse("0.1.0")?.to_string()),
                 rev: Some(666),
-                call_alias: Some("test-component".to_string()),
+                call_alias: None,
                 tags: vec!["test".to_string(), "wasmcloud.com/experimental".to_string()],
                 common: GenerateCommon {
                     directory: Some(PathBuf::from("./keys")),
@@ -1327,7 +1329,6 @@ mod test {
                     .contains(&"wasmcloud.com/experimental".to_string())); // from project_config
                 assert_eq!(cmd.metadata.rev.unwrap(), 777);
                 assert_eq!(cmd.metadata.ver.unwrap(), "0.2.0");
-                assert_eq!(cmd.metadata.call_alias.unwrap(), "test-component"); // from project_config
             }
 
             _ => unreachable!("claims constructed incorrect command"),
@@ -1338,7 +1339,7 @@ mod test {
 
     #[test]
     fn rust_provider_metadata_with_project_config_overrides() -> anyhow::Result<()> {
-        let result = get_config(
+        let result = load_config(
             Some(PathBuf::from(
                 "./tests/parser/files/rust_provider_claims_metadata.toml",
             )),
@@ -1347,8 +1348,7 @@ mod test {
 
         let project_config = assert_ok!(result);
 
-        let mut expected_default_key_dir = home::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Unable to determine the user's home directory"))?;
+        let mut expected_default_key_dir = etcetera::home_dir()?;
         expected_default_key_dir.push(".wash/keys");
 
         assert_eq!(
@@ -1379,10 +1379,18 @@ mod test {
                 name: "testprovider".to_string(),
                 version: Version::parse("0.1.0").unwrap(),
                 revision: 666,
-                path: PathBuf::from("./tests/parser/files/")
+                wasm_bin_name: None,
+                project_dir: PathBuf::from("./tests/parser/files/")
                     .canonicalize()
                     .unwrap(),
-                wasm_bin_name: None,
+                build_dir: PathBuf::from("./tests/parser/files/")
+                    .canonicalize()
+                    .unwrap()
+                    .join("build"),
+                wit_dir: PathBuf::from("./tests/parser/files/")
+                    .canonicalize()
+                    .unwrap()
+                    .join("wit"),
                 registry: RegistryConfig::default(),
             }
         );

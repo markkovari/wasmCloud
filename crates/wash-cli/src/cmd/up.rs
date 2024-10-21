@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use async_nats_0_33::Client;
+use async_nats::Client;
 use clap::Parser;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -26,10 +26,22 @@ use wash_lib::config::{
 };
 use wash_lib::context::fs::ContextDir;
 use wash_lib::context::ContextManager;
+use wash_lib::generate::emoji;
 use wash_lib::start::{
-    ensure_nats_server, ensure_wadm, ensure_wasmcloud, find_wasmcloud_binary, nats_pid_path,
-    new_patch_version_of_after_string, start_nats_server, start_wadm, start_wasmcloud_host,
-    NatsConfig, WadmConfig, NATS_SERVER_BINARY, WADM_PID,
+    ensure_nats_server,
+    ensure_wadm,
+    ensure_wasmcloud,
+    find_wasmcloud_binary,
+    nats_pid_path,
+    new_patch_version_of_after_string,
+    start_nats_server,
+    start_wadm,
+    start_wasmcloud_host,
+    NatsConfig,
+    WadmConfig,
+    NATS_SERVER_BINARY,
+    WADM_PID,
+    NATS_SERVER_CONF,
 };
 use wasmcloud_control_interface::{Client as CtlClient, ClientBuilder as CtlClientBuilder};
 
@@ -516,7 +528,7 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
             out_json.insert("success".to_string(), json!(true));
             let _ = write!(
                 out_text,
-                "\n🕸  NATS is running in the background at http://{nats_listen_address}"
+                "\n🕸  NATS is running in the background at {nats_listen_address}"
             );
 
             let _ = write!(
@@ -706,7 +718,7 @@ pub async fn handle_up(cmd: UpCommand, output_kind: OutputKind) -> Result<Comman
 
         let _ = write!(
             out_text,
-            "\n🕸  NATS is running in the background at http://{nats_listen_address}"
+            "\n🕸  NATS is running in the background at {nats_listen_address}"
         );
 
         let _ = write!(
@@ -751,7 +763,7 @@ async fn running_host_count(ctl_client: &CtlClient) -> Result<WasmCloudHostState
         .await
         .map_err(|e| anyhow!(e))?
         .into_iter()
-        .filter_map(|r| r.response)
+        .filter_map(|r| r.into_data())
         .count()
     {
         1 => return Ok(WasmCloudHostState::Running),
@@ -786,7 +798,7 @@ fn is_process_running(pid: &str) -> bool {
 /// then loads and deploys the WADM manifest.
 #[allow(clippy::too_many_arguments)]
 fn process_wadm_manifest(
-    client: async_nats_0_33::Client,
+    client: Client,
     lattice: String,
     host_started: Arc<AtomicBool>,
     host_state: WasmCloudHostState,
@@ -840,7 +852,7 @@ fn process_wadm_manifest(
 /// Helper function to deploy a WADM application (including removing a previous version)
 /// for use when calling `wash up --manifest`
 async fn deploy_wadm_application(
-    client: &async_nats_0_33::Client,
+    client: &Client,
     manifest: AppManifest,
     lattice: &str,
 ) -> Result<()> {
@@ -890,6 +902,20 @@ pub(crate) async fn start_nats(
         .await;
     let nats_process =
         start_nats_server(nats_binary, nats_log_file, nats_config, command_group).await?;
+    eprintln!(
+        "{} NATS server successfully started, using config @ [{}]",
+        emoji::INFO_SQUARE,
+        nats_binary
+            .parent()
+            .context("unexpectedly missing parent dir")?
+            .join(NATS_SERVER_CONF)
+            .display()
+    );
+    eprintln!(
+        "{} NATS server logs written to [{}]",
+        emoji::INFO_SQUARE,
+        nats_log_path.display()
+    );
 
     // save the PID so we can kill it later
     if let Some(pid) = nats_process.id() {
