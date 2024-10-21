@@ -294,7 +294,7 @@ async fn integration_up_works_with_new_patch_version_if_possible() -> Result<()>
     let host = cmd_output.hosts.first();
     assert!(host.is_some(), "host is present");
     if let Some(host) = host {
-        if let Some(version) = &host.version {
+        if let Some(version) = host.version() {
             let new_patched_version = semver::Version::parse(version)?;
             assert!(
                 new_patched_version.major == default_version.major,
@@ -328,7 +328,7 @@ async fn integration_up_works_with_specific_wasmcloud_host_version() -> Result<(
     let host = cmd_output.hosts.first();
     assert!(host.is_some(), "host is present");
     if let Some(host) = host {
-        if let Some(version) = &host.version {
+        if let Some(version) = host.version() {
             assert_eq!(version, "1.0.4", "specified version is overwritten")
         }
     }
