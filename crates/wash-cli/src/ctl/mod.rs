@@ -352,9 +352,9 @@ mod test {
             CTL_PORT,
             "--timeout-ms",
             "2001",
-            HOST_ID,
             "wasmcloud.azurecr.io/component:v2",
             "mycomponentv2",
+            HOST_ID,
             "--count",
             "1",
             "--annotations",
@@ -381,7 +381,7 @@ mod test {
                 assert_eq!(&opts.ctl_port.unwrap(), CTL_PORT);
                 assert_eq!(&opts.lattice.unwrap(), DEFAULT_LATTICE);
                 assert_eq!(opts.timeout_ms, 2001);
-                assert_eq!(host_id, HOST_ID);
+                assert_eq!(host_id, Some(HOST_ID.to_string()));
                 assert_eq!(
                     component_ref,
                     "wasmcloud.azurecr.io/component:v2".to_string()

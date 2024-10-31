@@ -24,11 +24,6 @@ pub struct ScaleComponentCommand {
     #[clap(flatten)]
     pub opts: CliConnectionOpts,
 
-    /// ID of host to scale component on. If a non-ID is provided, the host will be selected based on
-    /// matching the friendly name and will return an error if more than one host matches.
-    #[clap(name = "host-id")]
-    pub host_id: String,
-
     /// Component reference, e.g. the absolute file path or OCI URL.
     #[clap(name = "component-ref")]
     pub component_ref: String,
@@ -36,6 +31,11 @@ pub struct ScaleComponentCommand {
     /// Unique ID to use for the component
     #[clap(name = "component-id", value_parser = validate_component_id)]
     pub component_id: String,
+
+    /// ID of host to scale component on. If a non-ID is provided, the host will be selected based on
+    /// matching the friendly name and will return an error if more than one host matches.
+    #[clap(name = "host-id")]
+    pub host_id: Option<String>,
 
     /// Maximum number of component instances allowed to run concurrently. Setting this value to `0` will stop the component.
     #[clap(short = 'c', long = "max-instances", alias = "max-concurrent", alias = "max", alias = "count", default_value_t = u32::MAX)]
@@ -72,7 +72,7 @@ pub async fn handle_scale_component(cmd: ScaleComponentCommand) -> Result<Comman
         client: &client,
         // NOTE(thomastaylor312): In the future, we could check if this is interactive and then
         // prompt the user to choose if more than one thing matches
-        host_id: &find_host_id(&cmd.host_id, &client).await?.0,
+        host_id: &find_host_id(&cmd.host_id.unwrap(), &client).await?.0,
         component_id: &cmd.component_id,
         component_ref: &component_ref,
         max_instances: cmd.max_instances,

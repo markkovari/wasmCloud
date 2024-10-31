@@ -17,9 +17,9 @@ async fn integration_scale_component_serial() -> Result<()> {
         .args([
             "scale",
             "component",
-            wash_instance.host_id.as_str(),
             HELLO_OCI_REF,
             "hello_component_id",
+            wash_instance.host_id.as_str(),
             "--max",
             "10",
             "--output",
