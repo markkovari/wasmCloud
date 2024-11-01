@@ -146,7 +146,7 @@ pub async fn stop_provider(
         .map_err(boxed_err_to_anyhow)?;
 
     let host_id = if let Some(host_id) = host_id {
-        find_host_id(host_id, client).await?.0
+        find_host_id(Some(host_id), client).await?.0
     } else {
         find_host_with_provider(provider_id, client).await?
     };

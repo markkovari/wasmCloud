@@ -72,7 +72,7 @@ pub async fn handle_scale_component(cmd: ScaleComponentCommand) -> Result<Comman
         client: &client,
         // NOTE(thomastaylor312): In the future, we could check if this is interactive and then
         // prompt the user to choose if more than one thing matches
-        host_id: &find_host_id(&cmd.host_id.unwrap(), &client).await?.0,
+        host_id: &find_host_id(cmd.host_id.as_deref(), &client).await?.0,
         component_id: &cmd.component_id,
         component_ref: &component_ref,
         max_instances: cmd.max_instances,

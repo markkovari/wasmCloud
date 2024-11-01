@@ -36,7 +36,7 @@ pub async fn handle_label_host(cmd: LabelHostCommand) -> Result<CommandOutput> {
     let wco: WashConnectionOptions = cmd.opts.try_into()?;
     let client = wco.into_ctl_client(None).await?;
 
-    let (host_id, friendly_name) = find_host_id(&cmd.host_id, &client).await?;
+    let (host_id, friendly_name) = find_host_id(Some(cmd.host_id.as_ref()), &client).await?;
 
     let friendly_name = if friendly_name.is_empty() {
         host_id.to_string()
