@@ -112,6 +112,7 @@ async fn integration_scale_component_without_host_id_with_one_host_serial() -> R
         .await
         .context("failed to scale component")?;
 
+    eprintln!("output: {:?}", String::from_utf8_lossy(&output.stderr));
     assert!(output.status.success(), "executed scale");
 
     let cmd_output: ScaleCommandOutput =

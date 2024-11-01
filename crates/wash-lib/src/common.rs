@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Context;
 use tracing::error;
-use wasmcloud_control_interface::HostInventory;
+use wasmcloud_control_interface::{CtlResponse, Host, HostInventory};
 
 use crate::id::{ModuleId, ServerId, ServiceId};
 
@@ -100,6 +100,18 @@ pub async fn find_provider_id(
     find_id_matches(value, ctl_client).await
 }
 
+// Get the host ID if only one host is present
+fn get_host_id_if_only_one(hosts: &Vec<CtlResponse<Host>>) -> Option<ServerId> {
+    if hosts.len() == 1 {
+        let host = hosts.into_iter().next().unwrap();
+        let host_id = host.clone().into_data().map(|h| h.id().to_string());
+        if let Some(host_id) = host_id {
+            return Some(ServerId::from_str(&host_id).unwrap());
+        }
+    }
+    None
+}
+
 async fn find_id_matches<T: FromStr + ToString + Display>(
     value: &str,
     ctl_client: &wasmcloud_control_interface::Client,
@@ -176,18 +188,22 @@ pub async fn find_host_id(
     value: &str,
     ctl_client: &wasmcloud_control_interface::Client,
 ) -> Result<(ServerId, String), FindIdError> {
-    if let Ok(id) = ServerId::from_str(value) {
-        return Ok((id, String::new()));
-    }
-
-    // Case insensitive searching here to make things nicer
-    let value = value.to_lowercase();
-
     let hosts = ctl_client
         .get_hosts()
         .await
         .map_err(boxed_err_to_anyhow)
         .context("unable to fetch hosts for lookup")?;
+    
+    if let Some(host_id) = get_host_id_if_only_one(&hosts) {
+        return Ok((host_id, String::new()));
+    }
+
+    if let Ok(id) = ServerId::from_str(value) {
+        return Ok((id, String::new()));
+    }
+
+    // Case insensitive searching here to make things nicer
+    let value: String = value.to_lowercase();
 
     let all_matches = hosts
         .into_iter()
