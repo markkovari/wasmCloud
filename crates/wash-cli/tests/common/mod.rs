@@ -179,6 +179,7 @@ pub async fn find_open_port() -> Result<u16> {
 }
 
 #[allow(unused)]
+#[derive(Debug)]
 pub struct TestWashInstance {
     /// ID of the host
     pub host_id: String,
