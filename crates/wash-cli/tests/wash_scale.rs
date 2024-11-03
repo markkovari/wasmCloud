@@ -2,7 +2,6 @@ mod common;
 
 use std::vec;
 
-use async_nats::jetstream::new;
 use common::{TestWashInstance, HELLO_OCI_REF};
 
 use anyhow::{Context, Result};
@@ -172,40 +171,21 @@ async fn integration_scale_component_without_host_id_with_one_host_serial() -> R
 #[cfg_attr(not(can_reach_ghcr_io), ignore = "ghcr.io is not reachable")]
 async fn integration_scale_component_without_host_id_with_multiple_host_serial() -> Result<()> {
     let wash_instance = TestWashInstance::create().await?;
-    eprintln!("wash_instance: {:?}", wash_instance);
+    let nats_port = wash_instance.nats_port.to_string();
 
-    //wait 3 seconds for the first host to be registered
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-    let _wash_instance_other = TestWashInstance::create_with_extra_args(vec![
-        "--nats-port",
-        wash_instance.nats_port.to_string().as_ref(),
-        "--nats-connect-only",
-        "--output",
-        "json",
-        "--detached",
-        "--host-seed",
-        wash_instance.host_seed.as_str(),
-        "--cluster-seed",
-        wash_instance.cluster_seed.as_str(),
-        "--multi-local",
-    ])
-    .await?;
-    // eprintln!("wash_instance_other: {:?}", _wash_instance_other);
+    tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
 
+    let _wash_instance_other = TestWashInstance::create_connected(wash_instance).await?;
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
     let output = Command::new(env!("CARGO_BIN_EXE_wash"))
-        .args([
-            "get",
-            "hosts",
-            "--output",
-            "json",
-            "--ctl-port",
-            &wash_instance.nats_port.to_string(),
-        ])
+        .args(["get", "hosts", "--output", "json", "--ctl-port", &nats_port])
         .kill_on_drop(true)
         .output()
         .await
-        .context("failed to execute get inventory")?;
+        .context("failed to execute get hosts")?;
 
+    eprintln!("output: {:?}", String::from_utf8_lossy(&output.stderr));
     assert!(output.status.success(), "executed get claims query");
 
     let cmd_output: GetHostsCommandOutput = serde_json::from_slice(&output.stdout)?;
@@ -226,7 +206,7 @@ async fn integration_scale_component_without_host_id_with_multiple_host_serial()
             "40000",
             "--skip-wait",
             "--ctl-port",
-            &wash_instance.nats_port.to_string(),
+            &nats_port,
         ])
         .kill_on_drop(true)
         .output()

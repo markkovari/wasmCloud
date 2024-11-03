@@ -102,12 +102,12 @@ pub async fn find_provider_id(
 
 // Get the host ID if only one host is present
 fn get_host_id_if_only_one(hosts: &[CtlResponse<Host>]) -> Option<ServerId> {
-    match hosts.first() {
-        None => None,
-        Some(host) => {
+    match (hosts.first(), hosts.len() == 1) {
+        (Some(host), true) => {
             let host_id = host.clone().into_data().map(|h| h.id().to_string());
             host_id.and_then(|host_id| ServerId::from_str(&host_id).ok())
         }
+        (_, _) => None,
     }
 }
 
@@ -197,10 +197,13 @@ pub async fn find_host_id(
         Some(host_id) => return Ok((host_id, String::new())),
         None => {
             if value.is_none() {
-                return Err(FindIdError::NoMatches);
+                return Err(FindIdError::Error(anyhow::anyhow!(
+                    "No host-id provided and multiple hosts can be found, please provide a host-id"
+                )));
             }
         }
     }
+
     // The value is guaranteed to be Some at this point, should be safe to unwrap
     let value = value.unwrap();
 
