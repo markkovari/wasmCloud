@@ -24,7 +24,5 @@
             "enabled": true
         }
     ],
-    "schedule": [
-        "weekly"
-    ]
+    "schedule": ["* 0-3 * * *"]
 }
