@@ -1,0 +1,30 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "config:base"
+    ],
+    "regexManagers": [
+        {
+            "fileMatch": [
+                "\\wadm.yaml$"
+            ],
+            "matchStrings": [
+                "?#image: ghcr\\.io/?<datasource>[a-z-]+?:(?<currentValue>\\S+)"
+            ],
+            "datasourceTemplate": "docker",
+            "depNameTemplate": "{{datasource}}",
+            "versioning": "semver"
+        }
+    ],
+    "packageRules": [
+        {
+            "matchDatasources": [
+                "docker"
+            ],
+            "enabled": true
+        }
+    ],
+    "schedule": [
+        "weekly"
+    ]
+}
