@@ -31,7 +31,7 @@ runs:
         yarn --version
 
     - name: Cache Turbo Build
-      uses: actions/cache@2cdf405574d6ef1f33a1d12acccd3ae82f47b3f2
+      uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a
       with:
         path: ${{ inputs.working-directory }}/.turbo
         key: ${{ runner.os }}-turbo-${{ github.sha }}-${{ github.workflow }}
