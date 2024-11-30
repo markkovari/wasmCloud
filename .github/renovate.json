@@ -42,7 +42,7 @@
   "packageRules": [
     {
       "matchUpdateTypes": ["minor", "patch", "major"],
-      "groupName": "example (local.)wadm.yaml files"
+      "groupName": "example (local.)wadm.yaml and README files"
     }
   ]
 }
