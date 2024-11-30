@@ -22,7 +22,7 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@cbb722410c2e876e24abbe8de2cc27693e501dcb
 
       - uses: oras-project/setup-oras@9c92598691bfef1424de2f8fae81941568f5889c
         with:

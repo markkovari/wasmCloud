@@ -27,7 +27,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@cbb722410c2e876e24abbe8de2cc27693e501dcb
       - name: Extract tag context
         id: ctx
         run: |
@@ -174,7 +174,7 @@ jobs:
           - bin-path: src/bin/messaging-nats-provider
           - bin-path: src/bin/sqldb-postgres-provider
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@cbb722410c2e876e24abbe8de2cc27693e501dcb
 
       # Set up wash
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
