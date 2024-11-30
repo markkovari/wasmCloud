@@ -18,8 +18,5 @@
                 "#?image: ghcr\\.io/wasmcloud/(?<depName>):(?<currentValue>)\\S+"
             ]
         }
-    ],
-    "schedule": [
-        "0 0 * * *"
     ]
 }
