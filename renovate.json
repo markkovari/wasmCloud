@@ -6,20 +6,39 @@
     "regex": {
         "pinDigests": false
     },
+    "github-actions": {
+        "enabled": false
+    },
+    "ignorePaths": [
+        "**/node_modules/**",
+        "**/bower_components/**",
+        "**/vendor/**",
+        "**/__tests__/**",
+        "**/test/**",
+        "**/tests/**"
+    ],
+    "includePaths": [
+        "**/examples/**"
+    ],
     "customManagers": [
         {
             "customType": "regex",
             "datasourceTemplate": "docker",
-            "depNameTemplate": "{{depName}}",
             "fileMatch": [
-                "^.*wadm.ya?ml$"
+                ".*wadm.yaml$"
             ],
+            "depNameTemplate": "{{component}}",
+            "currentValueTemplate": "ghcr.io/{{component}}:{{version}}",
+            "packageNameTemplate": "{{component}}",
+            "autoReplaceStringTemplate": "ghcr.io/{{component}}:{{newVersion}}",
+            "description": "Update to latest version of {{component}} for wadm files",
+            "extractVersionTemplate": "{{version}}",
+            "matchStringsStrategy": "combination",
+            "versioningTemplate": "{{version}}",
+            "registryUrlTemplate": "ghcr.io",
             "matchStrings": [
-                "#?image: ghcr\\.io/wasmcloud/(?<depName>):(?<currentValue>)\\S+"
+                "\\s*image:\\s+ghcr\\.io//(?P<component>.+?):(?P<version>.+)"
             ]
         }
-    ],
-    "schedule": [
-        "0 0 * * *"
     ]
 }
