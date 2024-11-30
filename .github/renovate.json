@@ -15,7 +15,8 @@
         "**/tests/**"
     ],
     "includePaths": [
-        "**/examples/**/*wadm.yaml"
+        "**/examples/**/*wadm.yaml",
+        "**/README.md"
     ],
     "customManagers": [
         {
@@ -23,25 +24,10 @@
             "description": "Update images in every example wadm.yaml",
             "fileMatch": [
                 ".*wadm.yaml$",
-                "README.md",
-                "readme.md"
+                "README.md"
             ],
             "matchStrings": [
                 "image:\\s*([a-zA-Z0-9]+://)?(?<depName>[a-zA-Z0-9./:_-]+):(?<currentValue>[a-zA-Z0-9._-]+)"
-            ],
-            "datasourceTemplate": "docker",
-            "depNameTemplate": "{{depName}}",
-            "versioningTemplate": "docker"
-        },
-        {
-            "customType": "regex",
-            "description": "Update images for example wash start provider calls",
-            "fileMatch": [
-                "README.md",
-                "readme.md"
-            ],
-            "matchStrings": [
-                "wash\\s*.*\\s*provider\\s*([a-zA-Z0-9]+://)?(?<depName>[a-zA-Z0-9./:_-]+):(?<currentValue>[a-zA-Z0-9._-]+)"
             ],
             "datasourceTemplate": "docker",
             "depNameTemplate": "{{depName}}",
