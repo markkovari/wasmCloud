@@ -3,26 +3,23 @@
     "extends": [
         "config:base"
     ],
-    "regexManagers": [
+    "regex": {
+        "pinDigests": false
+    },
+    "customManagers": [
         {
+            "customType": "regex",
+            "datasourceTemplate": "docker",
+            "depNameTemplate": "{{depName}}",
             "fileMatch": [
-                "\\wadm.yaml$"
+                "^.*wadm.ya?ml$"
             ],
             "matchStrings": [
-                "?#image: ghcr\\.io/?<datasource>[a-z-]+?:(?<currentValue>\\S+)"
-            ],
-            "datasourceTemplate": "docker",
-            "depNameTemplate": "{{datasource}}",
-            "versioning": "semver"
+                "#?image: ghcr\\.io/wasmcloud/(?<depName>):(?<currentValue>)\\S+"
+            ]
         }
     ],
-    "packageRules": [
-        {
-            "matchDatasources": [
-                "docker"
-            ],
-            "enabled": true
-        }
-    ],
-    "schedule": ["* 0-3 * * *"]
+    "schedule": [
+        "0 0 * * *"
+    ]
 }
