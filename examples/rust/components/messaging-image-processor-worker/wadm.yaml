@@ -109,7 +109,7 @@ spec:
     - name: blobstore-fs
       type: capability
       properties:
-        image: ghcr.io/wasmcloud/blobstore-fs:0.10.1
+        image: ghcr.io/wasmcloud/blobstore-fs:0.10.2
         ## To configure OTEL integration for this provider specifically, uncomment the lines below
         # config:
         #   - name: otel

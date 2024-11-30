@@ -69,4 +69,4 @@ spec:
     - name: blobstore
       type: capability
       properties:
-        image: ghcr.io/wasmcloud/blobstore-fs:0.10.1
+        image: ghcr.io/wasmcloud/blobstore-fs:0.10.2
