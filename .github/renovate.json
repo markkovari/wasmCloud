@@ -34,14 +34,18 @@
     ],
     "prHourlyLimit": 10,
     "schedule": [
-        "0 0 * * *"
+        "every weekend"
     ],
     "prConcurrentLimit": 1,
     "branchConcurrentLimit": 1,
     "packageRules": [
-      {
-        "matchUpdateTypes": ["minor", "patch", "major"],
-        "groupName": "All wadm.yaml files update"
-      }
+        {
+            "matchUpdateTypes": [
+                "minor",
+                "patch",
+                "major"
+            ],
+            "groupName": "example (local.)wadm.yaml files"
+        }
     ]
 }
