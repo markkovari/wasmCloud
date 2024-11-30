@@ -2,7 +2,7 @@ module github.com/wasmcloud/wasmcloud/examples/golang/components/http-client-tin
 
 go 1.23.0
 
-toolchain go1.23.2
+toolchain go1.23.3
 
 require (
 	github.com/bytecodealliance/wasm-tools-go v0.3.1
