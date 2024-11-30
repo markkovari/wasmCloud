@@ -3,23 +3,34 @@
     "extends": [
         "config:base"
     ],
-    "regex": {
-        "pinDigests": false
-    },
+    "enabledManagers": [
+        "custom.regex"
+    ],
+    "ignorePaths": [
+        "**/node_modules/**",
+        "**/bower_components/**",
+        "**/vendor/**",
+        "**/__tests__/**",
+        "**/test/**",
+        "**/tests/**"
+    ],
+    "includePaths": [
+        "**/examples/**/*wadm.yaml"
+    ],
     "customManagers": [
         {
             "customType": "regex",
-            "datasourceTemplate": "docker",
-            "depNameTemplate": "{{depName}}",
+            "description": "Update images in every example wadm.yaml",
             "fileMatch": [
-                "^.*wadm.ya?ml$"
+                ".*wadm.yaml$"
             ],
             "matchStrings": [
-                "#?image: ghcr\\.io/wasmcloud/(?<depName>):(?<currentValue>)\\S+"
-            ]
+                "image:\\s*([a-zA-Z0-9]+://)?(?<depName>[a-zA-Z0-9./:_-]+):(?<currentValue>[a-zA-Z0-9._-]+)"
+            ],
+            "datasourceTemplate": "docker",
+            "depNameTemplate": "{{depName}}",
+            "versioningTemplate": "docker"
         }
     ],
-    "schedule": [
-        "0 0 * * *"
-    ]
+    "prHourlyLimit": 10
 }
