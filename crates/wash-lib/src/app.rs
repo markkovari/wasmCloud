@@ -75,8 +75,19 @@ fn resolve_relative_file_paths_in_yaml(
             // Convert the base dir + relative path into a file based URL
             let full_path = base_dir.as_ref().join(
                 s.strip_prefix("file://")
-                    .context("failed to strip prefix")?,
+                    .context("failed to strip prefix on relative file path")?,
             );
+
+            // Ensure the resolved relative path exists
+            if !full_path.exists() {
+                return Err(wadm_client::error::ClientError::ManifestLoad(
+                    anyhow::anyhow!(
+                        "relative file path [{s}] (resolved to [{}]) does not exist",
+                        full_path.display()
+                    ),
+                ));
+            }
+
             // Build a file based URL and replace the existing one
             if let Ok(url) = Url::from_file_path(&full_path) {
                 *s = url.into();
@@ -632,6 +643,27 @@ mod test {
             "expected AppManifest::ModelName('foo')"
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_resolve_relative_manifest() -> Result<()> {
+        let tmp_dir = tempdir()?;
+        std::fs::write(tmp_dir.path().join("foo.yaml"), "exists")?;
+        let mut yaml = serde_yaml::from_str(
+            r#"
+mapping:
+  path: 'file://foo.yaml'
+"#,
+        )
+        .context("failed to build YAML")?;
+
+        resolve_relative_file_paths_in_yaml(&mut yaml, tmp_dir)
+            .context("failed to resolve relative file path")?;
+        assert!(matches!(
+                &yaml["mapping"]["path"],
+                serde_yaml::Value::String(s) if s.contains("file:///") && s.contains("/foo.yaml")
+        ));
         Ok(())
     }
 }

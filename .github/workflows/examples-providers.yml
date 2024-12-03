@@ -42,7 +42,7 @@ jobs:
           shared-key: "ubuntu-22.04-shared-cache"
       - name: install wash (previous version)
         if: ${{ matrix.wash-version != 'current' }}
-        uses: taiki-e/install-action@2f8caf5818c62a4fc4bb5c84c46d3e66e2ef9ca1
+        uses: taiki-e/install-action@ec9269c9ddb8f79f082e226dcbb74bfb4c652ab1
         with:
           tool: wash-cli@${{ matrix.wash-version }}
       - name: build wash (current)
@@ -129,6 +129,20 @@ jobs:
       - name: build project
         run: wash build
         working-directory: examples/${{ matrix.project.lang }}/providers/${{ matrix.project.name }}
+
+      # Install wit-bindgen
+      - uses: taiki-e/install-action@437c908c7e5ee18b63a261286cbe5147219f8a39
+        with:
+          tool: wit-bindgen-cli
+
+      # Build required project if necessary
+      - name: Build dependent component if present
+        shell: bash
+        working-directory: examples/${{ matrix.project.lang }}/providers/${{ matrix.project.name }}
+        run: |
+          if [[ -f component/wasmcloud.toml ]]; then
+             wash build -p component/wasmcloud.toml;
+          fi
 
       # Run the local.wadm that comes with the example
       - name: test provider load
