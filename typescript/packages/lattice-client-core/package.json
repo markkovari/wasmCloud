@@ -1,7 +1,7 @@
 {
   "name": "@wasmcloud/lattice-client-core",
   "license": "Apache-2.0",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Framework-agnostic core package for the wasmCloud Lattice Client",
   "author": "wasmCloud",
   "repository": {
@@ -47,8 +47,8 @@
     "@wasmcloud/tsconfig": "workspace:*",
     "rollup-plugin-sourcemaps": "^0.6.3",
     "tsup": "^8.3.5",
-    "type-fest": "^4.29.1",
-    "vite": "^6.0.2",
+    "type-fest": "^4.30.0",
+    "vite": "^6.0.3",
     "vite-plugin-dts": "^4.3.0",
     "vite-tsconfig-paths": "^5.1.3"
   },

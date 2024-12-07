@@ -42,7 +42,7 @@ jobs:
           shared-key: "ubuntu-22.04-shared-cache"
       - name: install wash (previous version)
         if: ${{ matrix.wash-version != 'current' }}
-        uses: taiki-e/install-action@ec9269c9ddb8f79f082e226dcbb74bfb4c652ab1
+        uses: taiki-e/install-action@f635080d9c6d032e2de5576897c6878b7dd4c4a9
         with:
           tool: wash-cli@${{ matrix.wash-version }}
       - name: build wash (current)
@@ -61,7 +61,7 @@ jobs:
 
   # Ensure that `wash build` and `wash app validate` works for all example projects below
   wash-build:
-    name: build
+    name: example-provider-build
     runs-on: ubuntu-22.04
     needs: [build-wash-cli]
     strategy:
@@ -131,7 +131,7 @@ jobs:
         working-directory: examples/${{ matrix.project.lang }}/providers/${{ matrix.project.name }}
 
       # Install wit-bindgen
-      - uses: taiki-e/install-action@437c908c7e5ee18b63a261286cbe5147219f8a39
+      - uses: taiki-e/install-action@f635080d9c6d032e2de5576897c6878b7dd4c4a9
         with:
           tool: wit-bindgen-cli
 
