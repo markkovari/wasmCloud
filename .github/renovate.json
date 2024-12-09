@@ -1,10 +1,13 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
-        "config:base"
+        "config:recommended"
     ],
     "enabledManagers": [
         "custom.regex"
+    ],
+    "repositories": [
+        "markkovari/wasmCloud"
     ],
     "ignorePaths": [
         "**/node_modules/**",
@@ -21,7 +24,7 @@
     "customManagers": [
         {
             "customType": "regex",
-            "description": "Update images in every example wadm.yaml",
+            "description": "Update images in every example wadm.yaml and READMEs",
             "fileMatch": [
                 ".*wadm.yaml$",
                 "README.md"
@@ -35,9 +38,6 @@
         }
     ],
     "prHourlyLimit": 10,
-    "schedule": [
-        "every weekend"
-    ],
     "prConcurrentLimit": 1,
     "branchConcurrentLimit": 1,
     "packageRules": [
